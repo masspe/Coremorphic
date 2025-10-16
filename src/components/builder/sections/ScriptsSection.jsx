@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { FileCode, Plus, Play, Edit, Trash2, Clock, CheckCircle2, AlertCircle, Code2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import CreateScriptDialog from "../scripts/CreateScriptDialog";
@@ -33,7 +33,7 @@ export default function ScriptsSection({ appId }) {
     queryKey: ['custom-scripts', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.CustomScript.filter({ app_id: appId });
+      return await backend.entities.CustomScript.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
@@ -42,7 +42,7 @@ export default function ScriptsSection({ appId }) {
     queryKey: ['script-executions', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const executions = await base44.entities.ScriptExecution.filter({ app_id: appId });
+      const executions = await backend.entities.ScriptExecution.filter({ app_id: appId });
       return executions.sort((a, b) => new Date(b.created_date) - new Date(a.created_date)).slice(0, 10);
     },
     enabled: !!appId,
@@ -50,7 +50,7 @@ export default function ScriptsSection({ appId }) {
 
   const deleteScriptMutation = useMutation({
     mutationFn: async (scriptId) => {
-      await base44.entities.CustomScript.delete(scriptId);
+      await backend.entities.CustomScript.delete(scriptId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-scripts', appId] });
@@ -61,7 +61,7 @@ export default function ScriptsSection({ appId }) {
 
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ id, is_active }) => {
-      await base44.entities.CustomScript.update(id, { is_active });
+      await backend.entities.CustomScript.update(id, { is_active });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['custom-scripts', appId] });

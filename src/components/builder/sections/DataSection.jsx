@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Database, Plus, Table, Pencil, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import NewEntityDialog from "../data/NewEntityDialog";
 import EditEntityDialog from "../data/EditEntityDialog";
@@ -19,7 +19,7 @@ export default function DataSection({ appId }) {
       if (!appId) return [];
       
       // Get all entity files for this app
-      const entityFiles = await base44.entities.AppFile.filter({ 
+      const entityFiles = await backend.entities.AppFile.filter({ 
         app_id: appId,
         type: 'entity'
       });

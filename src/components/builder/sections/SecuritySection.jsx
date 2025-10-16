@@ -3,7 +3,7 @@ import { Shield, Lock, Key, AlertTriangle, Plus, CheckCircle2, ScrollText, Monit
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import CreateAPIKeyDialog from "../security/CreateAPIKeyDialog";
 import APIKeyManagement from "../security/APIKeyManagement";
@@ -23,7 +23,7 @@ export default function SecuritySection({ appId }) {
     queryKey: ['app', appId],
     queryFn: async () => {
       if (!appId) return null;
-      return await base44.entities.App.get(appId);
+      return await backend.entities.App.get(appId);
     },
     enabled: !!appId,
   });
@@ -32,7 +32,7 @@ export default function SecuritySection({ appId }) {
     queryKey: ['api-keys', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.APIKey.filter({ app_id: appId });
+      return await backend.entities.APIKey.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
@@ -41,7 +41,7 @@ export default function SecuritySection({ appId }) {
     queryKey: ['security-alerts', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.SecurityAlert.filter({ app_id: appId, is_resolved: false });
+      return await backend.entities.SecurityAlert.filter({ app_id: appId, is_resolved: false });
     },
     enabled: !!appId,
   });
@@ -49,7 +49,7 @@ export default function SecuritySection({ appId }) {
   // Mutation to update app 2FA setting
   const update2FAMutation = useMutation({
     mutationFn: async (require2FA) => {
-      await base44.entities.App.update(appId, { 
+      await backend.entities.App.update(appId, { 
         require_2fa: require2FA 
       });
     },
@@ -61,7 +61,7 @@ export default function SecuritySection({ appId }) {
   // Mutation to resolve security alert
   const resolveAlertMutation = useMutation({
     mutationFn: async (alertId) => {
-      await base44.entities.SecurityAlert.update(alertId, {
+      await backend.entities.SecurityAlert.update(alertId, {
         is_resolved: true,
         resolved_at: new Date().toISOString()
       });

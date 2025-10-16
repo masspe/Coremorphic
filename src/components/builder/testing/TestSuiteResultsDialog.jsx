@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { 
   CheckCircle2, 
@@ -52,7 +52,7 @@ export default function TestSuiteResultsDialog({ open, onOpenChange, suite, appI
     queryKey: ['test-suite-executions', suite?.id],
     queryFn: async () => {
       if (!suite?.id) return [];
-      const allExecutions = await base44.entities.TestSuiteExecution.filter({ 
+      const allExecutions = await backend.entities.TestSuiteExecution.filter({ 
         suite_id: suite.id 
       });
       return allExecutions.sort((a, b) => 
@@ -70,7 +70,7 @@ export default function TestSuiteResultsDialog({ open, onOpenChange, suite, appI
       
       const executions = await Promise.all(
         selectedExecution.test_execution_ids.map(id =>
-          base44.entities.TestExecution.get(id).catch(() => null)
+          backend.entities.TestExecution.get(id).catch(() => null)
         )
       );
       

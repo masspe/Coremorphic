@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2, Check, AlertCircle } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 
 export default function RecordFormDialog({ open, onOpenChange, entity, record, onSuccess }) {
   const [formData, setFormData] = useState({});
@@ -42,7 +42,7 @@ export default function RecordFormDialog({ open, onOpenChange, entity, record, o
       setLoading(true);
       setStatus(null);
 
-      const EntityClass = base44.entities[entity.name];
+      const EntityClass = backend.entities[entity.name];
       
       if (record) {
         // Update existing record

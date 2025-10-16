@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2, FileCode } from "lucide-react";
 
 export default function EditScriptDialog({ open, onOpenChange, script, onSuccess }) {
@@ -50,7 +50,7 @@ export default function EditScriptDialog({ open, onOpenChange, script, onSuccess
     setUpdating(true);
 
     try {
-      await base44.entities.CustomScript.update(script.id, formData);
+      await backend.entities.CustomScript.update(script.id, formData);
 
       onSuccess?.();
       onOpenChange(false);

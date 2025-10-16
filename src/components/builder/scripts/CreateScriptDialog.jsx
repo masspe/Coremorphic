@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2, FileCode } from "lucide-react";
 
 const SCRIPT_TEMPLATES = {
@@ -129,7 +129,7 @@ export default function CreateScriptDialog({ open, onOpenChange, appId, onSucces
     setCreating(true);
 
     try {
-      await base44.entities.CustomScript.create({
+      await backend.entities.CustomScript.create({
         ...formData,
         app_id: appId
       });

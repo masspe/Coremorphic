@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react"; // Plus, Trash2 are no longer used but were part of original code, so keeping them for now
 
@@ -44,7 +44,7 @@ export default function CreateTriggerDialog({ open, onOpenChange, appId, onSucce
     queryKey: ['app-entities', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const entityFiles = await base44.entities.AppFile.filter({
+      const entityFiles = await backend.entities.AppFile.filter({
         app_id: appId,
         type: 'entity'
       });
@@ -58,7 +58,7 @@ export default function CreateTriggerDialog({ open, onOpenChange, appId, onSucce
     setCreating(true);
 
     try {
-      await base44.entities.Trigger.create({
+      await backend.entities.Trigger.create({
         ...formData,
         app_id: appId
       });

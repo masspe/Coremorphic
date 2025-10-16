@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2, Play, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function ExecuteScriptDialog({ open, onOpenChange, script, onSuccess }) {
@@ -43,7 +43,7 @@ export default function ExecuteScriptDialog({ open, onOpenChange, script, onSucc
                           script.script_type === 'powershell' ? 'executePowerShellScript' :
                           'executeScript';
 
-      const response = await base44.functions.invoke(functionName, {
+      const response = await backend.functions.invoke(functionName, {
         scriptId: script.id,
         inputData: parsedInput
       });

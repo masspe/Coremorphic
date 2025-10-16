@@ -1,59 +1,30 @@
-import { base44 } from './base44Client';
+import { backend } from './backendClient';
 
+export const App = backend.entities.App;
+export const AppFile = backend.entities.AppFile;
+export const APIKey = backend.entities.APIKey;
+export const SecurityAlert = backend.entities.SecurityAlert;
+export const AuditLog = backend.entities.AuditLog;
+export const UserSession = backend.entities.UserSession;
+export const RateLimitConfig = backend.entities.RateLimitConfig;
+export const AppMetric = backend.entities.AppMetric;
+export const Agent = backend.entities.Agent;
+export const Trigger = backend.entities.Trigger;
+export const TriggerLog = backend.entities.TriggerLog;
+export const Order = backend.entities.Order;
+export const OrderHistory = backend.entities.OrderHistory;
+export const ScheduledTask = backend.entities.ScheduledTask;
+export const ScheduledTaskLog = backend.entities.ScheduledTaskLog;
+export const CustomScript = backend.entities.CustomScript;
+export const ScriptExecution = backend.entities.ScriptExecution;
+export const TestCase = backend.entities.TestCase;
+export const TestExecution = backend.entities.TestExecution;
+export const TestSuite = backend.entities.TestSuite;
+export const TestSuiteExecution = backend.entities.TestSuiteExecution;
+export const TestCoverage = backend.entities.TestCoverage;
+export const Workflow = backend.entities.Workflow;
+export const WorkflowExecution = backend.entities.WorkflowExecution;
+export const Deployment = backend.entities.Deployment;
+export const FileRevision = backend.entities.FileRevision;
 
-export const App = base44.entities.App;
-
-export const AppFile = base44.entities.AppFile;
-
-export const APIKey = base44.entities.APIKey;
-
-export const SecurityAlert = base44.entities.SecurityAlert;
-
-export const AuditLog = base44.entities.AuditLog;
-
-export const UserSession = base44.entities.UserSession;
-
-export const RateLimitConfig = base44.entities.RateLimitConfig;
-
-export const AppMetric = base44.entities.AppMetric;
-
-export const Agent = base44.entities.Agent;
-
-export const Trigger = base44.entities.Trigger;
-
-export const TriggerLog = base44.entities.TriggerLog;
-
-export const Order = base44.entities.Order;
-
-export const OrderHistory = base44.entities.OrderHistory;
-
-export const ScheduledTask = base44.entities.ScheduledTask;
-
-export const ScheduledTaskLog = base44.entities.ScheduledTaskLog;
-
-export const CustomScript = base44.entities.CustomScript;
-
-export const ScriptExecution = base44.entities.ScriptExecution;
-
-export const TestCase = base44.entities.TestCase;
-
-export const TestExecution = base44.entities.TestExecution;
-
-export const TestSuite = base44.entities.TestSuite;
-
-export const TestSuiteExecution = base44.entities.TestSuiteExecution;
-
-export const TestCoverage = base44.entities.TestCoverage;
-
-export const Workflow = base44.entities.Workflow;
-
-export const WorkflowExecution = base44.entities.WorkflowExecution;
-
-export const Deployment = base44.entities.Deployment;
-
-export const FileRevision = base44.entities.FileRevision;
-
-
-
-// auth sdk:
-export const User = base44.auth;
+export const User = backend.entities.User;

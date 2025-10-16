@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { BarChart3, TrendingUp, Eye, Clock, Users, Activity, Calendar, Download, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
@@ -43,7 +43,7 @@ export default function AnalyticsSection({ appId }) {
       const days = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : 1;
       const startDate = startOfDay(subDays(new Date(), days));
       
-      const allMetrics = await base44.entities.AppMetric.filter({ app_id: appId });
+      const allMetrics = await backend.entities.AppMetric.filter({ app_id: appId });
       return allMetrics.filter(m => new Date(m.created_date) >= startDate);
     },
     enabled: !!appId,
@@ -52,7 +52,7 @@ export default function AnalyticsSection({ appId }) {
   const { data: users = [] } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
-      return await base44.entities.User.list();
+      return await backend.entities.User.list();
     },
     initialData: [],
   });

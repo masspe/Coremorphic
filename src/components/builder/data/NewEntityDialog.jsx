@@ -1,6 +1,6 @@
 
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useSearchParams } from "react-router-dom";
 import {
   Dialog,
@@ -33,7 +33,7 @@ export default function NewEntityDialog({ open, onOpenChange, onSuccess }) {
 
     setGenerating(true);
     try {
-      const response = await base44.functions.invoke('generateEntitySchema', {
+      const response = await backend.functions.invoke('generateEntitySchema', {
         prompt: aiPrompt.trim() // Changed from aiPrompt to aiPrompt.trim() for safety
       });
 
@@ -72,7 +72,7 @@ export default function NewEntityDialog({ open, onOpenChange, onSuccess }) {
 
     setLoading(true);
     try {
-      await base44.functions.invoke('createEntity', {
+      await backend.functions.invoke('createEntity', {
         appId: appId,
         name: entityName.trim(), // Changed entityName to name, and trimmed
         schema: JSON.parse(schemaJson)

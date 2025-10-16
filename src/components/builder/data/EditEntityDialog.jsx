@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useSearchParams } from "react-router-dom";
 import {
   Dialog,
@@ -39,7 +39,7 @@ export default function EditEntityDialog({ open, onOpenChange, entity, onSuccess
 
     setGenerating(true);
     try {
-      const response = await base44.functions.invoke('generateEntitySchema', {
+      const response = await backend.functions.invoke('generateEntitySchema', {
         prompt: `Modify the existing entity "${entityName}" based on this request: ${aiPrompt}\n\nCurrent schema: ${schemaJson}`
       });
 
@@ -72,7 +72,7 @@ export default function EditEntityDialog({ open, onOpenChange, entity, onSuccess
 
     setLoading(true);
     try {
-      await base44.functions.invoke('updateEntity', {
+      await backend.functions.invoke('updateEntity', {
         appId: appId,
         entityPath: entity.path,
         schema: JSON.parse(schemaJson)

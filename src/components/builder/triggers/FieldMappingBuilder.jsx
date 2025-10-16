@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 
 const SPECIAL_VALUES = [
@@ -35,7 +35,7 @@ export default function FieldMappingBuilder({
     queryKey: ['entity-schema', appId, sourceEntity],
     queryFn: async () => {
       if (!appId || !sourceEntity) return null;
-      const entityFiles = await base44.entities.AppFile.filter({
+      const entityFiles = await backend.entities.AppFile.filter({
         app_id: appId,
         type: 'entity',
         name: `${sourceEntity}.json`
@@ -53,7 +53,7 @@ export default function FieldMappingBuilder({
     queryKey: ['entity-schema', appId, targetEntity],
     queryFn: async () => {
       if (!appId || !targetEntity) return null;
-      const entityFiles = await base44.entities.AppFile.filter({
+      const entityFiles = await backend.entities.AppFile.filter({
         app_id: appId,
         type: 'entity',
         name: `${targetEntity}.json`

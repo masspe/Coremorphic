@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2, Sparkles } from "lucide-react";
 import YAMLEditor from "./YAMLEditor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -144,7 +144,7 @@ export default function CreateWorkflowDialog({ open, onOpenChange, appId, onSucc
     setGeneratingAI(true);
 
     try {
-      const response = await base44.integrations.Core.InvokeLLM({
+      const response = await backend.integrations.Core.InvokeLLM({
         prompt: `Generate a GitHub Actions YAML workflow configuration for the following requirement:
 
 ${aiPrompt}
@@ -175,7 +175,7 @@ Format the output as valid YAML.`,
     setCreating(true);
 
     try {
-      await base44.entities.Workflow.create({
+      await backend.entities.Workflow.create({
         ...formData,
         app_id: appId,
         yaml_config: yamlConfig

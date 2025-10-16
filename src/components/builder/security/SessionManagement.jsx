@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Monitor, MapPin, Clock, X, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { format, formatDistanceToNow } from "date-fns";
@@ -25,14 +25,14 @@ export default function SessionManagement({ appId }) {
     queryKey: ['user-sessions', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.UserSession.filter({ app_id: appId, is_active: true }, '-last_activity');
+      return await backend.entities.UserSession.filter({ app_id: appId, is_active: true }, '-last_activity');
     },
     enabled: !!appId,
   });
 
   const terminateSessionMutation = useMutation({
     mutationFn: async (sessionId) => {
-      await base44.entities.UserSession.update(sessionId, {
+      await backend.entities.UserSession.update(sessionId, {
         is_active: false
       });
     },

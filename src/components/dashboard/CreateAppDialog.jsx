@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -59,7 +59,7 @@ export default function CreateAppDialog({ open, onClose, onAppCreated }) {
 
     try {
       // Create the app
-      const app = await base44.entities.App.create({
+      const app = await backend.entities.App.create({
         name: formData.name,
         description: formData.description,
         icon: formData.icon,
@@ -75,7 +75,7 @@ export default function CreateAppDialog({ open, onClose, onAppCreated }) {
         setLoadingMessage("AI is generating your app code...");
 
         try {
-          const response = await base44.functions.invoke('generateAppCode', {
+          const response = await backend.functions.invoke('generateAppCode', {
             prompt: formData.generationPrompt.trim(),
             appId: app.id
           });
@@ -142,7 +142,7 @@ export default function CreateAppDialog({ open, onClose, onAppCreated }) {
     ];
 
     for (const file of defaultFiles) {
-      await base44.functions.invoke('createAppFile', file);
+      await backend.functions.invoke('createAppFile', file);
     }
   };
 

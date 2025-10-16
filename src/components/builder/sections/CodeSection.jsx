@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Code, FileCode, Folder, FolderOpen, Save, RefreshCw, Check, AlertCircle, Download, Search, Wand2, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { cn } from "@/lib/utils";
 import CodeEditor from "../CodeEditor";
 import {
@@ -63,7 +63,7 @@ export default function CodeSection({ appId }) {
     try {
       setLoading(true);
       setSaveStatus(null);
-      const { data } = await base44.functions.invoke('listAppFiles', { appId });
+      const { data } = await backend.functions.invoke('listAppFiles', { appId });
       setFiles(data.files);
       
       // Auto-select first page if available
@@ -87,7 +87,7 @@ export default function CodeSection({ appId }) {
       const event = new CustomEvent('file-selected', { detail: file });
       window.dispatchEvent(event);
       
-      const { data } = await base44.functions.invoke('getFileContent', { 
+      const { data } = await backend.functions.invoke('getFileContent', { 
         filePath: file.path,
         appId 
       });
@@ -109,7 +109,7 @@ export default function CodeSection({ appId }) {
       setSaving(true);
       setSaveStatus(null);
       
-      await base44.functions.invoke('updateFileContent', {
+      await backend.functions.invoke('updateFileContent', {
         filePath: selectedFile.path,
         content: fileContent,
         appId
@@ -152,7 +152,7 @@ export default function CodeSection({ appId }) {
       setExporting(true);
       setSaveStatus({ type: 'success', message: 'Preparing export...' });
       
-      const response = await base44.functions.invoke('exportAppToZip', { appId });
+      const response = await backend.functions.invoke('exportAppToZip', { appId });
       
       const blob = new Blob([response.data], { type: 'application/zip' });
       const url = window.URL.createObjectURL(blob);

@@ -61,10 +61,10 @@ export default function CodeEditor({ value, onChange, language = 'javascript', r
         typeRoots: ['node_modules/@types']
       });
 
-      // Add Base44 SDK type definitions for autocompletion
-      const base44Types = `
-        declare module '@/api/base44Client' {
-          export const base44: {
+      // Add backend client type definitions for autocompletion
+      const backendTypes = `
+        declare module '@/api/backendClient' {
+          export const backend: {
             entities: any;
             functions: {
               invoke: (name: string, params?: any) => Promise<any>;
@@ -99,8 +99,8 @@ export default function CodeEditor({ value, onChange, language = 'javascript', r
       `;
 
       monaco.languages.typescript.javascriptDefaults.addExtraLib(
-        base44Types,
-        'file:///node_modules/@types/base44/index.d.ts'
+        backendTypes,
+        'file:///node_modules/@types/backend/index.d.ts'
       );
 
       // Create editor instance

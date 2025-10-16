@@ -1,6 +1,6 @@
 
 import React, { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Plus, ExternalLink, Trash2, Edit, Sparkles } from "lucide-react";
@@ -14,11 +14,11 @@ export default function Dashboard() {
 
   const { data: apps = [], isLoading } = useQuery({
     queryKey: ['apps'],
-    queryFn: () => base44.entities.App.list('-created_date'),
+    queryFn: () => backend.entities.App.list('-created_date'),
   });
 
   const deleteAppMutation = useMutation({
-    mutationFn: (id) => base44.entities.App.delete(id),
+    mutationFn: (id) => backend.entities.App.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['apps'] });
     },

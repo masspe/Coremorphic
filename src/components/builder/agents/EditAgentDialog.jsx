@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useMutation } from "@tanstack/react-query";
 import {
   Dialog,
@@ -49,7 +49,7 @@ export default function EditAgentDialog({ open, onOpenChange, agent, onSuccess }
 
   const updateAgentMutation = useMutation({
     mutationFn: async (data) => {
-      await base44.entities.Agent.update(agent.id, data);
+      await backend.entities.Agent.update(agent.id, data);
     },
     onSuccess: () => {
       onSuccess();

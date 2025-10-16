@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Sparkles, Send, Plus, Loader2, Settings, MessageSquare, Code, Eye, Lightbulb, Paperclip, X, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion, AnimatePresence } from "framer-motion";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -104,7 +104,7 @@ export default function AIAssistant({ appId }) {
     setUploading(true);
     try {
       const uploadPromises = files.map(async (file) => {
-        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        const { file_url } = await backend.integrations.Core.UploadFile({ file });
         return {
           name: file.name,
           url: file_url,
@@ -159,7 +159,7 @@ export default function AIAssistant({ appId }) {
     try {
       if (creationMode) {
         // Creation mode - generate code
-        const response = await base44.functions.invoke('generateAppCode', {
+        const response = await backend.functions.invoke('generateAppCode', {
           prompt: userMessage || "Generate code based on the uploaded files",
           appId: appId,
           model: selectedModel,
@@ -261,7 +261,7 @@ export default function AIAssistant({ appId }) {
 
       } else {
         // Discussion mode - just chat
-        const response = await base44.integrations.Core.InvokeLLM({
+        const response = await backend.integrations.Core.InvokeLLM({
           prompt: userMessage || "Analyze these files and provide insights",
           add_context_from_internet: false,
           file_urls: filesForContext.map(f => f.url)

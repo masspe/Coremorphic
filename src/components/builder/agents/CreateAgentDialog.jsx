@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useMutation } from "@tanstack/react-query";
 import {
   Dialog,
@@ -35,7 +35,7 @@ export default function CreateAgentDialog({ open, onOpenChange, appId, onSuccess
 
   const createAgentMutation = useMutation({
     mutationFn: async (data) => {
-      await base44.entities.Agent.create({
+      await backend.entities.Agent.create({
         app_id: appId,
         ...data,
         tools: [],

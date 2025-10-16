@@ -3,7 +3,7 @@ import { ScrollText, Search, Filter, Download, RefreshCw, Calendar, User, Activi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -24,7 +24,7 @@ export default function AuditLogsViewer({ appId }) {
     queryKey: ['audit-logs', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const allLogs = await base44.entities.AuditLog.filter({ app_id: appId }, '-created_date', 100);
+      const allLogs = await backend.entities.AuditLog.filter({ app_id: appId }, '-created_date', 100);
       return allLogs;
     },
     enabled: !!appId,

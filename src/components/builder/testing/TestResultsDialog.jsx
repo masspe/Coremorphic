@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { 
   CheckCircle2, 
@@ -27,7 +27,7 @@ export default function TestResultsDialog({ open, onOpenChange, test, appId }) {
     queryKey: ['test-executions', test?.id],
     queryFn: async () => {
       if (!test?.id) return [];
-      const allExecutions = await base44.entities.TestExecution.filter({ 
+      const allExecutions = await backend.entities.TestExecution.filter({ 
         test_case_id: test.id 
       });
       return allExecutions.sort((a, b) => 

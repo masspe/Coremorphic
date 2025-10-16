@@ -3,7 +3,7 @@ import React, { useState } from "react";
 import { TestTube, Plus, Play, Edit, Trash2, CheckCircle2, XCircle, AlertCircle, Clock, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import CreateTestDialog from "../testing/CreateTestDialog";
@@ -35,7 +35,7 @@ export default function TestingSection({ appId }) {
     queryKey: ['test-cases', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.TestCase.filter({ app_id: appId });
+      return await backend.entities.TestCase.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
@@ -44,7 +44,7 @@ export default function TestingSection({ appId }) {
     queryKey: ['test-executions', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const executions = await base44.entities.TestExecution.filter({ app_id: appId });
+      const executions = await backend.entities.TestExecution.filter({ app_id: appId });
       return executions.sort((a, b) => new Date(b.created_date) - new Date(a.created_date)).slice(0, 10);
     },
     enabled: !!appId,
@@ -52,7 +52,7 @@ export default function TestingSection({ appId }) {
 
   const runTestMutation = useMutation({
     mutationFn: async (testId) => {
-      const result = await base44.functions.invoke('runTestCase', {
+      const result = await backend.functions.invoke('runTestCase', {
         testCaseId: testId,
         appId: appId
       });
@@ -66,7 +66,7 @@ export default function TestingSection({ appId }) {
 
   const deleteTestMutation = useMutation({
     mutationFn: async (testId) => {
-      await base44.entities.TestCase.delete(testId);
+      await backend.entities.TestCase.delete(testId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['test-cases', appId] });
