@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
@@ -40,14 +40,14 @@ export default function RateLimitingConfig({ appId }) {
     queryKey: ['rate-limit-configs', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.RateLimitConfig.filter({ app_id: appId });
+      return await backend.entities.RateLimitConfig.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
 
   const createConfigMutation = useMutation({
     mutationFn: async (data) => {
-      await base44.entities.RateLimitConfig.create({
+      await backend.entities.RateLimitConfig.create({
         app_id: appId,
         ...data
       });
@@ -61,7 +61,7 @@ export default function RateLimitingConfig({ appId }) {
 
   const updateConfigMutation = useMutation({
     mutationFn: async ({ id, data }) => {
-      await base44.entities.RateLimitConfig.update(id, data);
+      await backend.entities.RateLimitConfig.update(id, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rate-limit-configs', appId] });
@@ -72,7 +72,7 @@ export default function RateLimitingConfig({ appId }) {
 
   const deleteConfigMutation = useMutation({
     mutationFn: async (id) => {
-      await base44.entities.RateLimitConfig.delete(id);
+      await backend.entities.RateLimitConfig.delete(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rate-limit-configs', appId] });
@@ -81,7 +81,7 @@ export default function RateLimitingConfig({ appId }) {
 
   const toggleConfigMutation = useMutation({
     mutationFn: async ({ id, enabled }) => {
-      await base44.entities.RateLimitConfig.update(id, { enabled });
+      await backend.entities.RateLimitConfig.update(id, { enabled });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rate-limit-configs', appId] });

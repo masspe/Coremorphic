@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -56,7 +56,7 @@ export default function EditTaskDialog({ open, onOpenChange, task, onSuccess }) 
     setUpdating(true);
 
     try {
-      await base44.entities.ScheduledTask.update(task.id, {
+      await backend.entities.ScheduledTask.update(task.id, {
         ...formData,
         scheduled_date: new Date(formData.scheduled_date).toISOString()
       });

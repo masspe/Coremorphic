@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Package, Plus, Play, Edit, Trash2, TrendingUp, CheckCircle2, XCircle, AlertCircle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import CreateTestSuiteDialog from "../testing/CreateTestSuiteDialog";
@@ -40,14 +40,14 @@ export default function TestSuiteManager({ appId }) {
     queryKey: ['test-suites', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.TestSuite.filter({ app_id: appId });
+      return await backend.entities.TestSuite.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
 
   const runSuiteMutation = useMutation({
     mutationFn: async (suiteId) => {
-      const result = await base44.functions.invoke('runTestSuite', {
+      const result = await backend.functions.invoke('runTestSuite', {
         suiteId: suiteId,
         appId: appId
       });
@@ -60,7 +60,7 @@ export default function TestSuiteManager({ appId }) {
 
   const deleteSuiteMutation = useMutation({
     mutationFn: async (suiteId) => {
-      await base44.entities.TestSuite.delete(suiteId);
+      await backend.entities.TestSuite.delete(suiteId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['test-suites', appId] });

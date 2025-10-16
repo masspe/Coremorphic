@@ -3,14 +3,14 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { Home, LayoutDashboard, Code, Sparkles, LogOut } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 
 export default function Layout({ children, currentPageName }) {
   const location = useLocation();
   const [user, setUser] = React.useState(null);
 
   React.useEffect(() => {
-    base44.auth.me().then(setUser).catch(() => setUser(null));
+    backend.auth.me().then(setUser).catch(() => setUser(null));
   }, []);
 
   const navigationItems = [
@@ -20,7 +20,7 @@ export default function Layout({ children, currentPageName }) {
   ];
 
   const handleLogout = () => {
-    base44.auth.logout();
+    backend.auth.logout();
   };
 
   return (

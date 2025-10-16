@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Clock, Plus, Edit, Trash2, Play, Pause, CheckCircle2, AlertCircle, Calendar } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { format, isPast, isFuture } from "date-fns";
@@ -30,7 +30,7 @@ export default function ScheduledTasksSection({ appId }) {
     queryKey: ['scheduled-tasks', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.ScheduledTask.filter({ app_id: appId });
+      return await backend.entities.ScheduledTask.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
@@ -39,7 +39,7 @@ export default function ScheduledTasksSection({ appId }) {
     queryKey: ['scheduled-task-logs', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const allLogs = await base44.entities.ScheduledTaskLog.filter({ app_id: appId });
+      const allLogs = await backend.entities.ScheduledTaskLog.filter({ app_id: appId });
       return allLogs.sort((a, b) => new Date(b.execution_time) - new Date(a.execution_time)).slice(0, 10);
     },
     enabled: !!appId,
@@ -47,7 +47,7 @@ export default function ScheduledTasksSection({ appId }) {
 
   const cancelTaskMutation = useMutation({
     mutationFn: async (taskId) => {
-      await base44.entities.ScheduledTask.update(taskId, { 
+      await backend.entities.ScheduledTask.update(taskId, { 
         status: 'cancelled',
         updated_date: new Date().toISOString()
       });
@@ -59,7 +59,7 @@ export default function ScheduledTasksSection({ appId }) {
 
   const deleteTaskMutation = useMutation({
     mutationFn: async (taskId) => {
-      await base44.entities.ScheduledTask.delete(taskId);
+      await backend.entities.ScheduledTask.delete(taskId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['scheduled-tasks', appId] });

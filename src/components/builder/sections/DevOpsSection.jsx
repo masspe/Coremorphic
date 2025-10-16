@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
 import CreateWorkflowDialog from "../devops/CreateWorkflowDialog"; // New Component
 import WorkflowExecutionDialog from "../devops/WorkflowExecutionDialog"; // New Component
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"; // React Query Hooks
-import { base44 } from "@/api/base44Client"; // API Client
+import { backend } from "@/api/backendClient"; // API Client
 
 export default function DevOpsSection({ appId }) {
   const [selectedEnvironment, setSelectedEnvironment] = useState("production"); // Keep existing state
@@ -46,7 +46,7 @@ export default function DevOpsSection({ appId }) {
     queryKey: ['workflows', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.Workflow.filter({ app_id: appId });
+      return await backend.entities.Workflow.filter({ app_id: appId });
     },
     enabled: !!appId, // Only run query if appId is available
   });
@@ -56,7 +56,7 @@ export default function DevOpsSection({ appId }) {
     queryKey: ['deployments', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const allDeployments = await base44.entities.Deployment.filter({ app_id: appId });
+      const allDeployments = await backend.entities.Deployment.filter({ app_id: appId });
       // Sort by creation date and take the latest 10
       return allDeployments.sort((a, b) => new Date(b.created_date) - new Date(a.created_date)).slice(0, 10);
     },
@@ -66,8 +66,8 @@ export default function DevOpsSection({ appId }) {
   // Mutation for running a workflow
   const runWorkflowMutation = useMutation({
     mutationFn: async (workflowId) => {
-      // Invoke the 'runWorkflow' function via base44 client
-      const result = await base44.functions.invoke('runWorkflow', {
+      // Invoke the 'runWorkflow' function via backend client
+      const result = await backend.functions.invoke('runWorkflow', {
         workflowId,
         appId
       });

@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Wand2, CheckCircle2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -51,11 +51,11 @@ export default function CreateTestDialog({ open, onOpenChange, appId, onSuccess 
       
       switch (formData.test_type) {
         case 'trigger':
-          return await base44.entities.Trigger.filter({ app_id: appId });
+          return await backend.entities.Trigger.filter({ app_id: appId });
         case 'script':
-          return await base44.entities.CustomScript.filter({ app_id: appId });
+          return await backend.entities.CustomScript.filter({ app_id: appId });
         case 'scheduled_task':
-          return await base44.entities.ScheduledTask.filter({ app_id: appId });
+          return await backend.entities.ScheduledTask.filter({ app_id: appId });
         default:
           return [];
       }
@@ -71,7 +71,7 @@ export default function CreateTestDialog({ open, onOpenChange, appId, onSuccess 
 
     setGeneratingAI(true);
     try {
-      const response = await base44.functions.invoke('generateTestCase', {
+      const response = await backend.functions.invoke('generateTestCase', {
         targetType: formData.test_type,
         targetId: formData.target_id,
         appId: appId
@@ -109,7 +109,7 @@ export default function CreateTestDialog({ open, onOpenChange, appId, onSuccess 
       const mockData = JSON.parse(mockDataJson);
       const expectedOutput = JSON.parse(expectedOutputJson);
 
-      await base44.entities.TestCase.create({
+      await backend.entities.TestCase.create({
         ...formData,
         app_id: appId,
         mock_data: mockData,

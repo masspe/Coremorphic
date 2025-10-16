@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, AlertCircle, Clock, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ export default function ScriptLogsDialog({ open, onOpenChange, script }) {
     queryKey: ['script-logs', script?.id],
     queryFn: async () => {
       if (!script?.id) return [];
-      const executions = await base44.entities.ScriptExecution.filter({ 
+      const executions = await backend.entities.ScriptExecution.filter({ 
         script_id: script.id 
       });
       return executions.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));

@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Zap, Plus, Edit, Trash2, Power, TrendingUp, AlertCircle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import CreateTriggerDialog from "../triggers/CreateTriggerDialog";
@@ -31,7 +31,7 @@ export default function TriggersSection({ appId }) {
     queryKey: ['triggers', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.Trigger.filter({ app_id: appId });
+      return await backend.entities.Trigger.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
@@ -40,7 +40,7 @@ export default function TriggersSection({ appId }) {
     queryKey: ['trigger-logs', appId],
     queryFn: async () => {
       if (!appId) return [];
-      const logs = await base44.entities.TriggerLog.filter({ app_id: appId });
+      const logs = await backend.entities.TriggerLog.filter({ app_id: appId });
       return logs.sort((a, b) => new Date(b.created_date) - new Date(a.created_date)).slice(0, 10);
     },
     enabled: !!appId,
@@ -48,7 +48,7 @@ export default function TriggersSection({ appId }) {
 
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ id, is_active }) => {
-      await base44.entities.Trigger.update(id, { is_active });
+      await backend.entities.Trigger.update(id, { is_active });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['triggers', appId] });
@@ -57,7 +57,7 @@ export default function TriggersSection({ appId }) {
 
   const deleteTriggerMutation = useMutation({
     mutationFn: async (triggerId) => {
-      await base44.entities.Trigger.delete(triggerId);
+      await backend.entities.Trigger.delete(triggerId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['triggers', appId] });

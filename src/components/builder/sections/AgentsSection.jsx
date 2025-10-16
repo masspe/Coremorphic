@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Bot, Plus, MessageSquare, Edit, Trash2, Power, Smartphone, TrendingUp, Settings as SettingsIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import CreateAgentDialog from "../agents/CreateAgentDialog";
@@ -29,14 +29,14 @@ export default function AgentsSection({ appId }) {
     queryKey: ['agents', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.Agent.filter({ app_id: appId });
+      return await backend.entities.Agent.filter({ app_id: appId });
     },
     enabled: !!appId,
   });
 
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ id, is_active }) => {
-      await base44.entities.Agent.update(id, { is_active });
+      await backend.entities.Agent.update(id, { is_active });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents', appId] });
@@ -45,7 +45,7 @@ export default function AgentsSection({ appId }) {
 
   const deleteAgentMutation = useMutation({
     mutationFn: async (agentId) => {
-      await base44.entities.Agent.delete(agentId);
+      await backend.entities.Agent.delete(agentId);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents', appId] });

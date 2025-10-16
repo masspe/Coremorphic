@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +18,7 @@ export default function TriggerLogsDialog({ open, onOpenChange, trigger }) {
     queryKey: ['trigger-logs-detail', trigger?.id],
     queryFn: async () => {
       if (!trigger?.id) return [];
-      const allLogs = await base44.entities.TriggerLog.filter({ trigger_id: trigger.id });
+      const allLogs = await backend.entities.TriggerLog.filter({ trigger_id: trigger.id });
       return allLogs.sort((a, b) => new Date(b.created_date) - new Date(a.created_date));
     },
     enabled: !!trigger?.id && open,

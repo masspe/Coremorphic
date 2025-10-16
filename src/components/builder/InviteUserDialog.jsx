@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Mail, UserPlus, Loader2, Check, AlertCircle } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 
 export default function InviteUserDialog({ open, onOpenChange }) {
   const [email, setEmail] = useState("");
@@ -25,7 +25,7 @@ export default function InviteUserDialog({ open, onOpenChange }) {
       setLoading(true);
       setStatus(null);
 
-      await base44.functions.invoke('inviteUser', {
+      await backend.functions.invoke('inviteUser', {
         email,
         role
       });

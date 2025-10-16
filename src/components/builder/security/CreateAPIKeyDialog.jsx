@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge"; // Added this import
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import {
   Dialog,
   DialogContent,
@@ -54,7 +54,7 @@ export default function CreateAPIKeyDialog({ open, onOpenChange, appId, onSucces
 
     try {
       setCreating(true);
-      const { data } = await base44.functions.invoke('createAPIKey', {
+      const { data } = await backend.functions.invoke('createAPIKey', {
         appId,
         name: name.trim(),
         permissions

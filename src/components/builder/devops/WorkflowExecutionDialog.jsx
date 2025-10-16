@@ -6,7 +6,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { 
   CheckCircle2, 
@@ -27,7 +27,7 @@ export default function WorkflowExecutionDialog({ open, onOpenChange, executionI
     queryKey: ['workflow-execution', executionId],
     queryFn: async () => {
       if (!executionId) return null;
-      return await base44.entities.WorkflowExecution.get(executionId);
+      return await backend.entities.WorkflowExecution.get(executionId);
     },
     enabled: !!executionId && open,
     refetchInterval: (data) => {

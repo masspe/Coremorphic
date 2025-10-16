@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Users, UserPlus, Search, Shield, User, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import InviteUserDialog from "../InviteUserDialog";
 import { useQuery } from "@tanstack/react-query";
 
@@ -13,7 +13,7 @@ export default function UsersSection({ appId }) {
   const { data: users = [], isLoading, refetch } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
-      const allUsers = await base44.entities.User.list();
+      const allUsers = await backend.entities.User.list();
       return allUsers;
     },
     initialData: [],

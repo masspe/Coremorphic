@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +49,7 @@ export default function EditTestSuiteDialog({ open, onOpenChange, suite, appId, 
     queryKey: ['all-test-cases', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.TestCase.filter({ app_id: appId });
+      return await backend.entities.TestCase.filter({ app_id: appId });
     },
     enabled: !!appId && open,
   });
@@ -80,7 +80,7 @@ export default function EditTestSuiteDialog({ open, onOpenChange, suite, appId, 
     setUpdating(true);
 
     try {
-      await base44.entities.TestSuite.update(suite.id, {
+      await backend.entities.TestSuite.update(suite.id, {
         ...formData,
         test_case_ids: Array.from(selectedTests)
       });

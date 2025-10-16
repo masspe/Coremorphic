@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2 } from "lucide-react";
 
 export default function CreateTaskDialog({ open, onOpenChange, appId, onSuccess }) {
@@ -36,7 +36,7 @@ export default function CreateTaskDialog({ open, onOpenChange, appId, onSuccess 
     setCreating(true);
 
     try {
-      await base44.entities.ScheduledTask.create({
+      await backend.entities.ScheduledTask.create({
         ...formData,
         app_id: appId,
         scheduled_date: new Date(formData.scheduled_date).toISOString()

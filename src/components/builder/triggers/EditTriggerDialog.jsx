@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
@@ -40,7 +40,7 @@ export default function EditTriggerDialog({ open, onOpenChange, trigger, onSucce
     queryKey: ['app-entities', trigger?.app_id],
     queryFn: async () => {
       if (!trigger?.app_id) return [];
-      const entityFiles = await base44.entities.AppFile.filter({ 
+      const entityFiles = await backend.entities.AppFile.filter({ 
         app_id: trigger.app_id,
         type: 'entity'
       });
@@ -100,7 +100,7 @@ export default function EditTriggerDialog({ open, onOpenChange, trigger, onSucce
         }
       });
 
-      await base44.entities.Trigger.update(trigger.id, {
+      await backend.entities.Trigger.update(trigger.id, {
         ...formData,
         field_mapping: fieldMapping
       });

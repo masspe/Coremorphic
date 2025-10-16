@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { Loader2 } from "lucide-react";
 
 export default function EditTestDialog({ open, onOpenChange, test, onSuccess }) {
@@ -67,7 +67,7 @@ export default function EditTestDialog({ open, onOpenChange, test, onSuccess }) 
       const mockData = JSON.parse(mockDataJson);
       const expectedOutput = JSON.parse(expectedOutputJson);
 
-      await base44.entities.TestCase.update(test.id, {
+      await backend.entities.TestCase.update(test.id, {
         ...formData,
         mock_data: mockData,
         expected_output: expectedOutput

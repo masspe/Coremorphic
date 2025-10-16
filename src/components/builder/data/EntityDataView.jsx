@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Table, Plus, Pencil, Trash2, X, Loader2 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import RecordFormDialog from "./RecordFormDialog";
 
@@ -15,7 +15,7 @@ export default function EntityDataView({ open, onOpenChange, entity }) {
     queryKey: ['entity-records', entity?.name],
     queryFn: async () => {
       if (!entity) return [];
-      const EntityClass = base44.entities[entity.name];
+      const EntityClass = backend.entities[entity.name];
       if (!EntityClass) return [];
       return await EntityClass.list();
     },
@@ -24,7 +24,7 @@ export default function EntityDataView({ open, onOpenChange, entity }) {
 
   const deleteMutation = useMutation({
     mutationFn: async (recordId) => {
-      const EntityClass = base44.entities[entity.name];
+      const EntityClass = backend.entities[entity.name];
       await EntityClass.delete(recordId);
     },
     onSuccess: () => {

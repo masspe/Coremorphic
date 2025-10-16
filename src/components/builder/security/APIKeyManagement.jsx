@@ -4,7 +4,7 @@ import { Key, Trash2, Power, Copy, Check, Calendar, Shield } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { base44 } from "@/api/base44Client";
+import { backend } from "@/api/backendClient";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import {
@@ -28,14 +28,14 @@ export default function APIKeyManagement({ appId }) {
     queryKey: ['api-keys', appId],
     queryFn: async () => {
       if (!appId) return [];
-      return await base44.entities.APIKey.filter({ app_id: appId }, '-created_date');
+      return await backend.entities.APIKey.filter({ app_id: appId }, '-created_date');
     },
     enabled: !!appId,
   });
 
   const toggleMutation = useMutation({
     mutationFn: async ({ keyId, isActive }) => {
-      await base44.functions.invoke('toggleAPIKey', { keyId, isActive });
+      await backend.functions.invoke('toggleAPIKey', { keyId, isActive });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys', appId] });
@@ -44,7 +44,7 @@ export default function APIKeyManagement({ appId }) {
 
   const revokeMutation = useMutation({
     mutationFn: async (keyId) => {
-      await base44.functions.invoke('revokeAPIKey', { keyId });
+      await backend.functions.invoke('revokeAPIKey', { keyId });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['api-keys', appId] });
