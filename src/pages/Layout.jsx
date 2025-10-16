@@ -1,23 +1,31 @@
 
 import React from "react";
-import { Link, useLocation } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { Home, LayoutDashboard, Code, Sparkles, LogOut } from "lucide-react";
 import { backend } from "@/api/backendClient";
 
-export default function Layout({ children, currentPageName }) {
-  const location = useLocation();
+export default function Layout({ children, currentPageName, pageNames = [] }) {
   const [user, setUser] = React.useState(null);
 
   React.useEffect(() => {
     backend.auth.me().then(setUser).catch(() => setUser(null));
   }, []);
 
-  const navigationItems = [
+  const navigationItems = React.useMemo(() => ([
     { title: "Home", url: createPageUrl("Home"), icon: Home },
     { title: "Dashboard", url: createPageUrl("Dashboard"), icon: LayoutDashboard },
     { title: "Builder", url: createPageUrl("Builder"), icon: Code }
-  ];
+  ]), []);
+
+  React.useEffect(() => {
+    const mismatchedLinks = navigationItems.filter((item) => !pageNames.includes(item.title));
+
+    if (mismatchedLinks.length > 0) {
+      const mismatchedTitles = mismatchedLinks.map((item) => `"${item.title}"`).join(", ");
+      throw new Error(`Navigation link titles must exactly match page names (case sensitive): ${mismatchedTitles}`);
+    }
+  }, [navigationItems, pageNames]);
 
   const handleLogout = () => {
     backend.auth.logout();
@@ -65,11 +73,17 @@ export default function Layout({ children, currentPageName }) {
 
             <div className="hidden md:flex items-center gap-2">
               {navigationItems.map((item) => {
-                const isActive = location.pathname === item.url;
+                const isActive = currentPageName === item.title;
                 return (
                   <Link
                     key={item.title}
-                    to={item.url} className="flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 bg-white/20 backdrop-blur-sm border text-black border-white/30 shadow-lg">
+                    to={item.url}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 backdrop-blur-sm border border-white/30 shadow-lg ${isActive
+                      ? "bg-white text-slate-900"
+                      : "bg-white/20 text-slate-900/80 hover:bg-white/30 hover:text-slate-900"
+                    }`}
+                  >
                     <item.icon className="w-4 h-4" />
                     <span className="font-medium">{item.title}</span>
                   </Link>
