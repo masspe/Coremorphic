@@ -26,6 +26,41 @@ const DATABASE_URL = process.env.DATABASE_URL;
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
+const safeJson = (value) => {
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return '[unserializable]';
+  }
+};
+
+app.use((req, res, next) => {
+  const startTime = Date.now();
+  const requestSummary = {
+    method: req.method,
+    path: req.originalUrl,
+    query: req.query,
+    params: req.params,
+    body: req.body
+  };
+
+  console.log(`Incoming request: ${safeJson(requestSummary)}`);
+
+  res.on('finish', () => {
+    const durationMs = Date.now() - startTime;
+    console.log(
+      `Request completed: ${safeJson({
+        method: req.method,
+        path: req.originalUrl,
+        status: res.statusCode,
+        durationMs
+      })}`
+    );
+  });
+
+  next();
+});
+
 const uploadsDir = path.resolve(__dirname, '../uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
