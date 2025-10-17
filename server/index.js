@@ -19,6 +19,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const prisma = new PrismaClient();
+const fsPromises = fs.promises;
 const app = express();
 
 const PORT = process.env.PORT || 4000;
@@ -71,6 +72,11 @@ const upload = multer({ dest: uploadsDir });
 
 const tempDataDir = path.join(os.tmpdir(), 'coremorphic');
 const fileStorePath = path.join(tempDataDir, 'entities.json');
+const appsRootDir = path.resolve(__dirname, '../apps');
+
+if (!fs.existsSync(appsRootDir)) {
+  fs.mkdirSync(appsRootDir, { recursive: true });
+}
 
 const DEFAULT_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
@@ -532,6 +538,35 @@ app.post('/api/auth/logout', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   const { email } = req.body;
   res.json({ ...defaultUser, email: email ?? defaultUser.email });
+});
+
+app.post('/api/apps/:appId/save', async (req, res) => {
+  try {
+    const { appId } = req.params;
+    const { code } = req.body ?? {};
+
+    if (!appId || typeof appId !== 'string' || !appId.trim()) {
+      res.status(400).json({ error: 'A valid appId is required.' });
+      return;
+    }
+
+    if (typeof code !== 'string') {
+      res.status(400).json({ error: 'Code must be provided as a string.' });
+      return;
+    }
+
+    const trimmedAppId = appId.trim();
+    const appDirectory = path.join(appsRootDir, trimmedAppId);
+    const targetFile = path.join(appDirectory, 'index.jsx');
+
+    await fsPromises.mkdir(appDirectory, { recursive: true });
+    await fsPromises.writeFile(targetFile, code, 'utf8');
+
+    res.status(200).json({ success: true, path: targetFile });
+  } catch (error) {
+    console.error('Failed to persist generated app code', error);
+    res.status(500).json({ error: 'Failed to persist generated code.' });
+  }
 });
 
 app.get('/api/entities/:entityName', async (req, res, next) => {
