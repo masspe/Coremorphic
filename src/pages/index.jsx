@@ -1,22 +1,21 @@
 import Layout from "./Layout.jsx";
-
 import Home from "./Home";
-
 import Dashboard from "./Dashboard";
-
 import Builder from "./Builder";
+import NotFound from "./NotFound.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
+import { createPageUrl } from "@/utils";
 
 const PAGES = {
-    
     Home: Home,
-    
     Dashboard: Dashboard,
-    
     Builder: Builder,
-    
-}
+};
+
+const PAGE_NAMES = Object.keys(PAGES);
+const DEFAULT_PAGE_NAME = PAGE_NAMES[0];
+const DEFAULT_PAGE_COMPONENT = DEFAULT_PAGE_NAME ? PAGES[DEFAULT_PAGE_NAME] : null;
 
 function _getCurrentPage(url) {
     if (url.endsWith('/')) {
@@ -35,14 +34,39 @@ function _getCurrentPage(url) {
 function PagesContent() {
     const location = useLocation();
     const currentPage = _getCurrentPage(location.pathname);
-    
+
+    const pageRoutes = PAGE_NAMES.flatMap((pageName) => {
+        const PageComponent = PAGES[pageName];
+        const canonicalPath = createPageUrl(pageName) || "/";
+        const routes = [
+            <Route key={pageName} path={canonicalPath} element={<PageComponent />} />
+        ];
+
+        if (pageName === DEFAULT_PAGE_NAME && DEFAULT_PAGE_COMPONENT && canonicalPath !== "/") {
+            routes.push(
+                <Route
+                    key={`${pageName}-index`}
+                    path="/"
+                    element={<DEFAULT_PAGE_COMPONENT />}
+                />
+            );
+        }
+
+        if (pageName === DEFAULT_PAGE_NAME && DEFAULT_PAGE_COMPONENT && canonicalPath === "/") {
+            return [
+                <Route key={`${pageName}-index`} path="/" element={<DEFAULT_PAGE_COMPONENT />} />,
+                <Route key={`${pageName}-alias`} path="/home" element={<DEFAULT_PAGE_COMPONENT />} />
+            ];
+        }
+
+        return routes;
+    });
+
     return (
-        <Layout currentPageName={currentPage} pageNames={Object.keys(PAGES)}>
+        <Layout currentPageName={currentPage} pageNames={PAGE_NAMES}>
             <Routes>
-                <Route path="/" element={<Home />} />
-                <Route path="/home" element={<Home />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/builder" element={<Builder />} />
+                {pageRoutes}
+                <Route path="*" element={<NotFound homePageName={DEFAULT_PAGE_NAME} />} />
             </Routes>
         </Layout>
     );

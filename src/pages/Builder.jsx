@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from "react";
-import { useParams, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import BuilderSidebar from "../components/builder/BuilderSidebar";
 import AIAssistant from "../components/builder/AIAssistant";
 import PreviewPanel from "../components/builder/PreviewPanel";
@@ -21,8 +21,7 @@ import TriggersSection from "../components/builder/sections/TriggersSection";
 import ScheduledTasksSection from "../components/builder/sections/ScheduledTasksSection";
 import ScriptsSection from "../components/builder/sections/ScriptsSection";
 import TestingSection from "../components/builder/sections/TestingSection";
-import DevOpsSection from "../components/builder/sections/DevOpsSection"; // Added import for DevOpsSection
-import { Monitor, TestTube } from "lucide-react";
+import DevOpsSection from "../components/builder/sections/DevOpsSection";
 
 export default function Builder() {
   const [searchParams] = useSearchParams();
