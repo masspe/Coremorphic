@@ -3,6 +3,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import fs from 'fs';
 import multer from 'multer';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
@@ -68,8 +69,8 @@ if (!fs.existsSync(uploadsDir)) {
 
 const upload = multer({ dest: uploadsDir });
 
-const dataDir = path.resolve(__dirname, '../data');
-const fileStorePath = path.join(dataDir, 'entities.json');
+const tempDataDir = path.join(os.tmpdir(), 'coremorphic');
+const fileStorePath = path.join(tempDataDir, 'entities.json');
 
 const DEFAULT_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
