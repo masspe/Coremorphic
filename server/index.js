@@ -6,6 +6,7 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PrismaClient } from '@prisma/client';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -31,6 +32,245 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 const upload = multer({ dest: uploadsDir });
+
+const dataDir = path.resolve(__dirname, '../data');
+const fileStorePath = path.join(dataDir, 'entities.json');
+
+class FileEntityStore {
+  constructor(filePath) {
+    this.filePath = filePath;
+    this.state = { entities: [] };
+    this._ensureDirectory();
+    this._load();
+  }
+
+  _ensureDirectory() {
+    const directory = path.dirname(this.filePath);
+    if (!fs.existsSync(directory)) {
+      fs.mkdirSync(directory, { recursive: true });
+    }
+  }
+
+  _load() {
+    if (!fs.existsSync(this.filePath)) {
+      fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
+      return;
+    }
+
+    try {
+      const raw = fs.readFileSync(this.filePath, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.entities)) {
+        this.state.entities = parsed.entities;
+      }
+    } catch (error) {
+      console.warn('Failed to read local entity store. Recreating file store.', error);
+      this.state = { entities: [] };
+      fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
+    }
+  }
+
+  _persist() {
+    fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
+  }
+
+  _toEntity(record) {
+    return {
+      id: record.id,
+      type: record.type,
+      data: record.data,
+      createdAt: new Date(record.createdAt),
+      updatedAt: new Date(record.updatedAt)
+    };
+  }
+
+  async findMany({ where = {} } = {}) {
+    const { type } = where;
+    const items = typeof type === 'string' ? this.state.entities.filter((item) => item.type === type) : this.state.entities;
+    return items.map((item) => this._toEntity(item));
+  }
+
+  async findUnique({ where = {} } = {}) {
+    const { id } = where;
+    if (!id) return null;
+    const record = this.state.entities.find((item) => item.id === id);
+    return record ? this._toEntity(record) : null;
+  }
+
+  async create({ data }) {
+    const now = new Date();
+    const record = {
+      id: generateEntityId(),
+      type: data.type,
+      data: data.data,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    };
+    this.state.entities.push(record);
+    this._persist();
+    return this._toEntity(record);
+  }
+
+  async update({ where = {}, data }) {
+    const { id } = where;
+    if (!id) {
+      throw new Error('Entity id is required for updates');
+    }
+    const index = this.state.entities.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new Error('Entity not found');
+    }
+
+    const existing = this.state.entities[index];
+    const updatedAt = new Date();
+    const updated = {
+      ...existing,
+      type: data.type ?? existing.type,
+      data: data.data ?? existing.data,
+      updatedAt: updatedAt.toISOString()
+    };
+    this.state.entities[index] = updated;
+    this._persist();
+    return this._toEntity(updated);
+  }
+
+  async delete({ where = {} } = {}) {
+    const { id } = where;
+    if (!id) {
+      throw new Error('Entity id is required for deletion');
+    }
+    const index = this.state.entities.findIndex((item) => item.id === id);
+    if (index === -1) {
+      throw new Error('Entity not found');
+    }
+
+    const [removed] = this.state.entities.splice(index, 1);
+    this._persist();
+    return removed ? this._toEntity(removed) : null;
+  }
+}
+
+let prismaAvailable = true;
+let prismaWarningLogged = false;
+
+let fileStoreInstance = null;
+
+const generateEntityId = () => {
+  if (typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return crypto.randomBytes(16).toString('hex');
+};
+
+const getFileStore = () => {
+  if (!fileStoreInstance) {
+    fileStoreInstance = new FileEntityStore(fileStorePath);
+  }
+  return fileStoreInstance;
+};
+
+const shouldFallbackToFileStore = (error) => {
+  if (!error) return false;
+  if (error.code === 'P2031') {
+    return true;
+  }
+  const message = (error.message ?? '').toLowerCase();
+  return (
+    message.includes('replica set') ||
+    message.includes('transaction numbers are only allowed on a replica set')
+  );
+};
+
+const logFallbackWarning = () => {
+  if (prismaWarningLogged) return;
+  prismaWarningLogged = true;
+  console.warn(
+    'Prisma MongoDB client requires a replica set for transactions. Falling back to local file storage at',
+    fileStorePath
+  );
+};
+
+const disablePrisma = () => {
+  if (!prismaAvailable) return;
+  prismaAvailable = false;
+  logFallbackWarning();
+  prisma
+    .$disconnect()
+    .catch(() => {});
+};
+
+const entityStore = {
+  async findMany(args) {
+    if (prismaAvailable) {
+      try {
+        return await prisma.entity.findMany(args);
+      } catch (error) {
+        if (shouldFallbackToFileStore(error)) {
+          disablePrisma();
+          return getFileStore().findMany(args);
+        }
+        throw error;
+      }
+    }
+    return getFileStore().findMany(args);
+  },
+  async findUnique(args) {
+    if (prismaAvailable) {
+      try {
+        return await prisma.entity.findUnique(args);
+      } catch (error) {
+        if (shouldFallbackToFileStore(error)) {
+          disablePrisma();
+          return getFileStore().findUnique(args);
+        }
+        throw error;
+      }
+    }
+    return getFileStore().findUnique(args);
+  },
+  async create(args) {
+    if (prismaAvailable) {
+      try {
+        return await prisma.entity.create(args);
+      } catch (error) {
+        if (shouldFallbackToFileStore(error)) {
+          disablePrisma();
+          return getFileStore().create(args);
+        }
+        throw error;
+      }
+    }
+    return getFileStore().create(args);
+  },
+  async update(args) {
+    if (prismaAvailable) {
+      try {
+        return await prisma.entity.update(args);
+      } catch (error) {
+        if (shouldFallbackToFileStore(error)) {
+          disablePrisma();
+          return getFileStore().update(args);
+        }
+        throw error;
+      }
+    }
+    return getFileStore().update(args);
+  },
+  async delete(args) {
+    if (prismaAvailable) {
+      try {
+        return await prisma.entity.delete(args);
+      } catch (error) {
+        if (shouldFallbackToFileStore(error)) {
+          disablePrisma();
+          return getFileStore().delete(args);
+        }
+        throw error;
+      }
+    }
+    return getFileStore().delete(args);
+  }
+};
 
 app.use('/uploads', express.static(uploadsDir));
 
@@ -109,7 +349,7 @@ app.get('/api/entities/:entityName', async (req, res, next) => {
   try {
     const { entityName } = req.params;
     const { sort } = req.query;
-    const records = await prisma.entity.findMany({
+    const records = await entityStore.findMany({
       where: { type: entityName }
     });
     const formatted = records.map(buildEntityResponse);
@@ -122,7 +362,7 @@ app.get('/api/entities/:entityName', async (req, res, next) => {
 app.get('/api/entities/:entityName/:id', async (req, res, next) => {
   try {
     const { entityName, id } = req.params;
-    const record = await prisma.entity.findUnique({ where: { id } });
+    const record = await entityStore.findUnique({ where: { id } });
     if (!record || record.type !== entityName) {
       res.status(404).json({ error: 'Entity not found' });
       return;
@@ -137,7 +377,7 @@ app.post('/api/entities/:entityName/filter', async (req, res, next) => {
   try {
     const { entityName } = req.params;
     const { filter = {}, sort, limit, offset } = req.body ?? {};
-    const records = await prisma.entity.findMany({ where: { type: entityName } });
+    const records = await entityStore.findMany({ where: { type: entityName } });
     let formatted = records.map(buildEntityResponse).filter((item) => matchesFilter(item, filter));
     formatted = applySort(formatted, sort);
     if (typeof offset === 'number') {
@@ -156,7 +396,7 @@ app.post('/api/entities/:entityName', async (req, res, next) => {
   try {
     const { entityName } = req.params;
     const payload = req.body ?? {};
-    const record = await prisma.entity.create({
+    const record = await entityStore.create({
       data: {
         type: entityName,
         data: payload
@@ -172,7 +412,7 @@ app.put('/api/entities/:entityName/:id', async (req, res, next) => {
   try {
     const { entityName, id } = req.params;
     const payload = req.body ?? {};
-    const record = await prisma.entity.update({
+    const record = await entityStore.update({
       where: { id },
       data: {
         type: entityName,
@@ -188,7 +428,7 @@ app.put('/api/entities/:entityName/:id', async (req, res, next) => {
 app.delete('/api/entities/:entityName/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
-    await prisma.entity.delete({ where: { id } });
+    await entityStore.delete({ where: { id } });
     res.json({ success: true });
   } catch (error) {
     next(error);

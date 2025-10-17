@@ -38,6 +38,11 @@ npm run server
 
 The backend exposes its API at `http://localhost:4000/api`.
 
+> **Note:** Prisma requires MongoDB to run as a replica set to support transactions. If you are developing against a standalone
+> MongoDB instance, the server automatically falls back to a lightweight JSON file store located in `data/entities.json`. This
+> allows local development without additional database configuration, while production environments can continue using Prisma
+> with full MongoDB support.
+
 ## Running the front-end
 
 In a separate terminal, start the Vite dev server:
