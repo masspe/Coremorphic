@@ -30,6 +30,16 @@ This project contains the Coremorphic front-end (Vite + React) and a lightweight
 
    The default `.env` points Prisma to `mongodb://localhost:27017/coremorphic`, runs the backend on port `4000`, and sets `VITE_API_BASE_URL` to `http://localhost:4000/api` for the front-end.
 
+   ### Windows environment setup
+
+   If you prefer setting the environment variables globally on Windows instead of using a `.env` file, run the provided PowerShell script (from an elevated PowerShell window if you need system-wide variables):
+
+   ```powershell
+   pwsh -ExecutionPolicy Bypass -File scripts/windows/setup-env.ps1 -EnvFile .env
+   ```
+
+   The script reads key-value pairs from the specified `.env`-style file, sets them for the current session, and persists them for the current user via `setx`. Restart open terminals or IDEs after running the script so they pick up the new values.
+
 ## Running the backend
 
 ```bash
