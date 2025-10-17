@@ -307,6 +307,20 @@ app.post('/api/integrations/core/upload-private-file', upload.single('file'), as
   }
 });
 
+const clientDistPath = path.resolve(__dirname, '../dist');
+
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+
+    res.sendFile(path.join(clientDistPath, 'index.html'));
+  });
+}
+
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal Server Error', message: err.message });
