@@ -36,6 +36,159 @@ const upload = multer({ dest: uploadsDir });
 const dataDir = path.resolve(__dirname, '../data');
 const fileStorePath = path.join(dataDir, 'entities.json');
 
+const DEFAULT_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const OPENAI_API_URL = process.env.OPENAI_API_URL || 'https://api.openai.com/v1/chat/completions';
+
+const extractJson = (raw) => {
+  if (typeof raw !== 'string') {
+    return null;
+  }
+
+  const trimmed = raw.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  try {
+    return JSON.parse(trimmed);
+  } catch (error) {
+    return null;
+  }
+};
+
+const ensureArray = (value) => (Array.isArray(value) ? value : []);
+
+const normaliseFile = (file) => ({
+  name: typeof file?.name === 'string' ? file.name : file?.path ?? 'Untitled.jsx',
+  path: typeof file?.path === 'string' ? file.path : file?.name ?? 'Untitled.jsx',
+  type: typeof file?.type === 'string' ? file.type : 'file',
+  content: typeof file?.content === 'string' ? file.content : '',
+  language: typeof file?.language === 'string' ? file.language : 'javascript'
+});
+
+const normaliseEntity = (entity) => ({
+  name: typeof entity?.name === 'string' ? entity.name : 'Entity',
+  fields: ensureArray(entity?.fields ?? [])
+});
+
+const normaliseTrigger = (trigger) => ({
+  name: typeof trigger?.name === 'string' ? trigger.name : 'Trigger',
+  source: typeof trigger?.source === 'string' ? trigger.source : 'source',
+  target: typeof trigger?.target === 'string' ? trigger.target : 'target'
+});
+
+const normaliseTask = (task) => ({
+  name: typeof task?.name === 'string' ? task.name : 'Scheduled Task',
+  scheduled_at: task?.scheduled_at ?? new Date().toISOString(),
+  cadence: typeof task?.cadence === 'string' ? task.cadence : 'once'
+});
+
+const normaliseScript = (script) => ({
+  name: typeof script?.name === 'string' ? script.name : 'Script',
+  language: typeof script?.language === 'string' ? script.language : 'javascript',
+  content: typeof script?.content === 'string' ? script.content : ''
+});
+
+const normaliseTest = (test) => ({
+  name: typeof test?.name === 'string' ? test.name : 'Test Case',
+  test_type: typeof test?.test_type === 'string' ? test.test_type : 'unit',
+  steps: ensureArray(test?.steps ?? [])
+});
+
+const buildGenerationPrompt = ({ prompt, modificationMode = false, fileUrls = [] }) => {
+  const basePrompt = `You are Coremorphic's AI assistant. Generate starter application scaffolding based on the user's request.
+Return a JSON object with the following keys:
+- summary: short sentence summarising the work you performed.
+- createdFiles: array of { name, path, type, language, content } describing suggested source files.
+- createdEntities: array of { name, fields } for recommended data entities.
+- createdTriggers: array describing automation triggers with { name, source, target }.
+- createdTasks: array of scheduled tasks with { name, scheduled_at, cadence }.
+- createdScripts: array of custom scripts with { name, language, content }.
+- createdTests: array of tests with { name, test_type, steps }.
+Also include totalFiles, totalEntities, totalTriggers, totalTasks, totalScripts, totalTests representing the counts for each section.
+If you do not have enough information, make reasonable assumptions and still return valid JSON.`;
+
+  const context = [basePrompt, `User request: ${prompt.trim()}`];
+
+  if (modificationMode) {
+    context.push('The user may be modifying an existing application. Provide updates that can be merged into existing code.');
+  }
+
+  if (fileUrls.length > 0) {
+    context.push(`Reference these files for context: ${fileUrls.join(', ')}`);
+  }
+
+  return context.join('\n\n');
+};
+
+const generateAppCodeWithOpenAI = async (payload) => {
+  const apiKey = process.env.OPENAI_API_KEY || process.env.OPENAI_API_TOKEN;
+
+  if (!apiKey) {
+    throw new Error('OpenAI API key is not configured. Set OPENAI_API_KEY to enable AI generation.');
+  }
+
+  if (!payload?.prompt || typeof payload.prompt !== 'string' || !payload.prompt.trim()) {
+    throw new Error('A prompt is required to generate app code.');
+  }
+
+  const body = {
+    model: payload.model || DEFAULT_AI_MODEL,
+    temperature: 0.2,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a senior full-stack engineer assisting users in scaffolding web applications. Always respond with valid JSON.'
+      },
+      {
+        role: 'user',
+        content: buildGenerationPrompt(payload)
+      }
+    ]
+  };
+
+  const response = await fetch(OPENAI_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`OpenAI request failed: ${errorText || response.statusText}`);
+  }
+
+  const completion = await response.json();
+  const content = completion?.choices?.[0]?.message?.content;
+  const parsed = extractJson(content);
+
+  if (!parsed) {
+    throw new Error('Failed to parse response from OpenAI. Ensure the model returns JSON.');
+  }
+
+  const createdFiles = ensureArray(parsed.createdFiles).map(normaliseFile);
+  const createdEntities = ensureArray(parsed.createdEntities).map(normaliseEntity);
+  const createdTriggers = ensureArray(parsed.createdTriggers).map(normaliseTrigger);
+  const createdTasks = ensureArray(parsed.createdTasks).map(normaliseTask);
+  const createdScripts = ensureArray(parsed.createdScripts).map(normaliseScript);
+  const createdTests = ensureArray(parsed.createdTests).map(normaliseTest);
+
+  return {
+    summary: typeof parsed.summary === 'string' ? parsed.summary : 'Generated starter resources for your application.',
+    createdFiles,
+    createdEntities,
+    createdTriggers,
+    createdTasks,
+    createdScripts,
+    createdTests,
+    totalFiles: Number.isFinite(parsed.totalFiles) ? parsed.totalFiles : createdFiles.length,
+    totalEntities: Number.isFinite(parsed.totalEntities) ? parsed.totalEntities : createdEntities.length,
+    totalTriggers: Number.isFinite(parsed.totalTriggers) ? parsed.totalTriggers : createdTriggers.length,
+    totalTasks: Number.isFinite(parsed.totalTasks) ? parsed.totalTasks : createdTasks.length,
+    totalScripts: Number.isFinite(parsed.totalScripts) ? parsed.totalScripts : createdScripts.length,
+    totalTests: Number.isFinite(parsed.totalTests) ? parsed.totalTests : createdTests.length
+  };
+};
+
 class FileEntityStore {
   constructor(filePath) {
     this.filePath = filePath;
@@ -442,7 +595,13 @@ app.post('/api/functions/:name', async (req, res, next) => {
 
     switch (name) {
       case 'generateAppCode':
-        res.json({ code: '// Generated app code placeholder', metadata: payload });
+        try {
+          const data = await generateAppCodeWithOpenAI(payload);
+          res.json({ data });
+        } catch (error) {
+          console.error('Failed to generate app code:', error);
+          res.status(500).json({ error: error.message || 'Failed to generate app code' });
+        }
         break;
       case 'generateEntitySchema':
         res.json({ schema: { name: payload?.name ?? 'Entity', fields: [] } });
