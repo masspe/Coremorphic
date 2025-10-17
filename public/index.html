@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coremorphic Blog</title>
+    <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@1.5.10/css/pico.min.css" />
+    <style>
+      body {
+        background-color: #0f172a;
+        color: #e2e8f0;
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 2rem 1rem 4rem;
+      }
+
+      .post-card {
+        background: rgba(30, 41, 59, 0.85);
+        border: 1px solid rgba(148, 163, 184, 0.2);
+        border-radius: 16px;
+        padding: 1.5rem;
+        margin-bottom: 1.5rem;
+        box-shadow: 0 20px 45px -20px rgba(15, 23, 42, 0.6);
+      }
+
+      .comment {
+        border-left: 3px solid #38bdf8;
+        padding-left: 1rem;
+        margin-bottom: 1rem;
+        color: #cbd5f5;
+      }
+
+      form {
+        margin-top: 2rem;
+        background: rgba(15, 23, 42, 0.75);
+        border-radius: 16px;
+        padding: 1.5rem;
+        border: 1px solid rgba(148, 163, 184, 0.15);
+      }
+
+      label {
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header style="text-align: center; margin-bottom: 2rem">
+        <h1>Coremorphic Blog</h1>
+        <p>
+          A minimal full-stack blog demo built with Express and vanilla JavaScript.
+          Create posts, share updates, and keep the conversation going with comments.
+        </p>
+      </header>
+
+      <section>
+        <h2>Latest posts</h2>
+        <div id="posts"></div>
+      </section>
+
+      <section>
+        <h2>Create a post</h2>
+        <form id="post-form">
+          <label for="title">Title</label>
+          <input id="title" name="title" placeholder="Post title" required />
+
+          <label for="author">Author</label>
+          <input id="author" name="author" placeholder="Your name" required />
+
+          <label for="content">Content</label>
+          <textarea id="content" name="content" placeholder="Share your story..." required></textarea>
+
+          <button type="submit">Publish post</button>
+        </form>
+      </section>
+    </main>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
