@@ -45,6 +45,28 @@ const files = {
 
 const generate = (payload) => request("/generate", { method: "POST", body: payload });
 
+const auth = {
+  /**
+   * Retrieve the currently authenticated user if the backend exposes the endpoint.
+   * Falls back to rejecting so callers can handle missing authentication gracefully.
+   */
+  async me() {
+    return request("/auth/me");
+  },
+
+  /**
+   * Attempt to log out. If the endpoint is unavailable we silently ignore the error
+   * so the UI can continue to operate in local/demo environments.
+   */
+  async logout() {
+    try {
+      await request("/auth/logout", { method: "POST" });
+    } catch (error) {
+      console.warn("Auth logout endpoint is unavailable:", error);
+    }
+  }
+};
+
 const emptyEntityClient = {
   async list() {
     return [];
@@ -87,6 +109,7 @@ export const backend = {
   memory,
   files,
   generate,
+  auth,
   entities,
   functions
 };
