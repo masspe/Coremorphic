@@ -1,9 +1,9 @@
 
 import React, { useState } from "react";
 import { backend } from "@/api/backendClient";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, ExternalLink, Trash2, Edit, Sparkles } from "lucide-react";
+import { Plus, Sparkles } from "lucide-react";
 import { motion } from "framer-motion";
 import CreateAppDialog from "../components/dashboard/CreateAppDialog";
 import AppCard from "../components/dashboard/AppCard";
@@ -12,23 +12,10 @@ export default function Dashboard() {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const queryClient = useQueryClient();
 
-  const { data: apps = [], isLoading } = useQuery({
-    queryKey: ['apps'],
-    queryFn: () => backend.entities.App.list('-created_date'),
+  const { data: projects = [], isLoading } = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => backend.projects.list(),
   });
-
-  const deleteAppMutation = useMutation({
-    mutationFn: (id) => backend.entities.App.delete(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['apps'] });
-    },
-  });
-
-  const handleDeleteApp = (app) => {
-    if (confirm(`Delete "${app.name}"?`)) {
-      deleteAppMutation.mutate(app.id);
-    }
-  };
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -97,12 +84,11 @@ export default function Dashboard() {
         </motion.div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {apps.map((app, index) => (
+          {projects.map((project, index) => (
             <AppCard
-              key={app.id}
-              app={app}
+              key={project.id}
+              project={project}
               index={index}
-              onDelete={handleDeleteApp}
             />
           ))}
         </div>
@@ -111,9 +97,8 @@ export default function Dashboard() {
       <CreateAppDialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
-        onAppCreated={(app) => {
-          // Optional: navigate to builder after creating app
-          // window.location.href = createPageUrl('Builder') + '?appId=' + app.id;
+        onProjectCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['projects'] });
         }}
       />
     </div>
