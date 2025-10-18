@@ -25,6 +25,26 @@ const deviceSizes = {
   mobile: "w-[375px] h-[667px] mx-auto"
 };
 
+const normalizeSandpackPath = (path = "") => {
+  if (!path) return "/";
+  const normalized = path.replace(/^\.?\//, "").replace(/\\/g, "/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+};
+
+const PREVIEW_ENTRY_CANDIDATES = [
+  "/src/main.tsx",
+  "/src/main.jsx",
+  "/src/main.js",
+  "/src/App.tsx",
+  "/src/App.jsx"
+];
+
+const OPTIONAL_PREVIEW_DEV_DEPENDENCIES = [
+  "tailwindcss",
+  "postcss",
+  "autoprefixer"
+];
+
 const SandpackErrorBridge = ({ onErrorChange }) => {
   const errorMessage = useErrorMessage();
   const previousMessageRef = useRef();
@@ -112,6 +132,64 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
     return selectedFile.path.startsWith("/") ? selectedFile.path : `/${selectedFile.path}`;
   }, [selectedFile]);
 
+  const sandpackConfig = useMemo(() => {
+    const normalizedPaths = new Set(files.map((file) => normalizeSandpackPath(file.path)));
+    const entry =
+      PREVIEW_ENTRY_CANDIDATES.find((candidate) => normalizedPaths.has(candidate)) ||
+      "/src/main.tsx";
+
+    const packageFile = files.find(
+      (file) => normalizeSandpackPath(file.path) === "/package.json"
+    );
+
+    let parsedPackage = null;
+    if (packageFile?.content) {
+      try {
+        parsedPackage = JSON.parse(packageFile.content);
+      } catch (error) {
+        console.warn("Failed to parse package.json for preview", error);
+      }
+    }
+
+    const dependencies = {
+      react: "18.2.0",
+      "react-dom": "18.2.0",
+      ...(parsedPackage?.dependencies ?? {})
+    };
+
+    OPTIONAL_PREVIEW_DEV_DEPENDENCIES.forEach((name) => {
+      const version = parsedPackage?.devDependencies?.[name];
+      if (version) {
+        dependencies[name] = version;
+      }
+    });
+
+    const usesTypeScript = entry.endsWith(".ts") || entry.endsWith(".tsx");
+    const devDependencies = parsedPackage?.devDependencies ?? {};
+
+    if (usesTypeScript) {
+      if (!dependencies.typescript) {
+        dependencies.typescript = devDependencies.typescript || "5.6.2";
+      }
+      if (!dependencies["@types/react"]) {
+        dependencies["@types/react"] = devDependencies["@types/react"] || "18.3.3";
+      }
+      if (!dependencies["@types/react-dom"]) {
+        dependencies["@types/react-dom"] = devDependencies["@types/react-dom"] || "18.3.3";
+      }
+    }
+
+    if (!dependencies.vite) {
+      dependencies.vite = devDependencies.vite || "5.4.0";
+    }
+
+    return {
+      entry,
+      template: usesTypeScript ? "react-ts" : "react",
+      dependencies
+    };
+  }, [files]);
+
   const sandpackFiles = useMemo(() => {
     const map = {};
 
@@ -120,6 +198,10 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
         map[path] = { code };
       }
     };
+
+    const entryScriptPath = sandpackConfig.entry.startsWith("/")
+      ? sandpackConfig.entry
+      : `/${sandpackConfig.entry}`;
 
     ensure(
       "/index.html",
@@ -132,50 +214,89 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="${entryScriptPath}"></script>
   </body>
 </html>`
     );
 
-    ensure(
-      "/src/main.tsx",
-      `import React from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
+    if (sandpackConfig.template === "react") {
+      ensure(
+        "/src/main.jsx",
+        `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><App /></React.StrictMode>
-)`
-    );
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`
+      );
 
-    ensure("/src/App.tsx", `export default function App(){ return <h1>Hello from preview</h1> }`);
+      ensure(
+        "/src/App.jsx",
+        `export default function App() {
+  return <h1>Hello from preview</h1>;
+}
+`
+      );
+    } else {
+      ensure(
+        "/src/main.tsx",
+        `import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+
+ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`
+      );
+
+      ensure(
+        "/src/App.tsx",
+        `import React from 'react';
+
+const App: React.FC = () => {
+  return <h1>Hello from preview</h1>;
+};
+
+export default App;
+`
+      );
+
+      ensure(
+        "/tsconfig.json",
+        JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2020",
+              module: "ESNext",
+              jsx: "react-jsx",
+              moduleResolution: "Bundler",
+              esModuleInterop: true,
+              strict: true,
+              skipLibCheck: true
+            }
+          },
+          null,
+          2
+        )
+      );
+    }
 
     files.forEach((file) => {
-      const normalizedPath = file.path.startsWith("/") ? file.path : `/${file.path}`;
+      const normalizedPath = normalizeSandpackPath(file.path);
       map[normalizedPath] = {
         code: file.content ?? "",
         active: normalizedPath === activeFilePath
       };
     });
 
-    ensure(
-      "/tsconfig.json",
-      JSON.stringify(
-        {
-          compilerOptions: {
-            target: "ES2020",
-            module: "ESNext",
-            jsx: "react-jsx",
-            moduleResolution: "Bundler",
-            esModuleInterop: true,
-            strict: true,
-            skipLibCheck: true
-          }
-        },
-        null,
-        2
-      )
-    );
+    const fallbackDependencies = { ...sandpackConfig.dependencies };
 
     ensure(
       "/package.json",
@@ -190,14 +311,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             build: "vite build",
             preview: "vite preview"
           },
-          dependencies: {
-            react: "18.2.0",
-            "react-dom": "18.2.0"
-          },
-          devDependencies: {
-            vite: "5.4.0",
-            typescript: "5.6.2"
-          }
+          dependencies: fallbackDependencies
         },
         null,
         2
@@ -205,7 +319,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     );
 
     return map;
-  }, [files, activeFilePath]);
+  }, [files, activeFilePath, sandpackConfig]);
 
   const handleRuntimeErrorChange = useCallback((message) => {
     setRuntimeError(message || null);
@@ -320,7 +434,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <div className="relative h-full">
               <SandpackProvider
                 key={refreshKey}
-                template="react-ts"
+                template={sandpackConfig.template}
                 files={sandpackFiles}
                 options={{
                   autorun: true,
@@ -329,11 +443,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   externalResources: []
                 }}
                 customSetup={{
-                  dependencies: {
-                    react: "18.2.0",
-                    "react-dom": "18.2.0"
-                  },
-                  entry: "/src/main.tsx"
+                  dependencies: sandpackConfig.dependencies,
+                  entry: sandpackConfig.entry
                 }}
               >
                 <div className="h-full">
