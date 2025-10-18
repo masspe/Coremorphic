@@ -33,7 +33,7 @@ export default function Layout({ children, currentPageName, pageNames = [] }) {
   return (
     <div className="min-h-screen bg-[#f2f6ff] text-slate-700">
       <div className="flex min-h-screen flex-col">
-        <header className="border-b border-slate-200 bg-white/80 backdrop-blur">
+        <header className="relative z-20 border-b border-slate-200 bg-white/80 backdrop-blur">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:gap-6">
             <Link to={createPageUrl("Home")} className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white shadow-md ring-1 ring-slate-200">
