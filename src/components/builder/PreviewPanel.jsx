@@ -1,5 +1,11 @@
-import React, { useState, useEffect } from "react";
-import { X, Monitor, Smartphone, Tablet, RefreshCw, AlertTriangle } from "lucide-react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  Sandpack,
+  SandpackPreview,
+  SandpackLayout
+} from "@codesandbox/sandpack-react";
+import "@codesandbox/sandpack-react/dist/index.css";
+import { X, Monitor, Smartphone, Tablet, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { backend } from "@/api/backendClient";
@@ -14,8 +20,8 @@ const deviceSizes = {
 export default function PreviewPanel({ projectId, selectedFile, onClose }) {
   const [device, setDevice] = useState("desktop");
   const [refreshKey, setRefreshKey] = useState(0);
-  const [previewHtml, setPreviewHtml] = useState("");
-  const [buildError, setBuildError] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
 
   const handleRefresh = () => {
@@ -25,22 +31,42 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
   useEffect(() => {
     const loadPreview = async () => {
       if (!projectId) {
-        setPreviewHtml("");
-        setBuildError("Select a project to preview.");
+        setLoading(false);
+        setFiles([]);
+        setStatus({
+          kind: "empty",
+          heading: "Select a project",
+          message: "Open a project from the dashboard to start previewing.",
+          icon: Monitor
+        });
         return;
       }
 
       setLoading(true);
-      setBuildError(null);
+      setStatus(null);
       try {
-        const response = await backend.request(`/projects/${projectId}/preview`);
-        setPreviewHtml(response?.html ?? "");
-        if (!response?.html) {
-          setBuildError("No previewable files were returned for this project.");
+        const response = await backend.files.list(projectId);
+        const fileList = Array.isArray(response) ? response : [];
+        setFiles(fileList);
+        if (fileList.length === 0) {
+          setStatus({
+            kind: "empty",
+            heading: "No preview yet",
+            message: "Generate files with the assistant or save code to preview it.",
+            icon: Monitor
+          });
+        } else {
+          setStatus(null);
         }
       } catch (error) {
-        setPreviewHtml("");
-        setBuildError(error.message || "Failed to build preview");
+        console.error("Failed to load preview", error);
+        setFiles([]);
+        setStatus({
+          kind: "error",
+          heading: "Preview unavailable",
+          message: error.message || "Failed to load project files.",
+          icon: AlertTriangle
+        });
       } finally {
         setLoading(false);
       }
@@ -54,6 +80,106 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
     window.addEventListener("file-saved", onFileSaved);
     return () => window.removeEventListener("file-saved", onFileSaved);
   }, []);
+
+  const activeFilePath = useMemo(() => {
+    if (!selectedFile?.path) return null;
+    return selectedFile.path.startsWith("/") ? selectedFile.path : `/${selectedFile.path}`;
+  }, [selectedFile]);
+
+  const sandpackFiles = useMemo(() => {
+    const map = {};
+
+    const ensure = (path, code) => {
+      if (!map[path]) {
+        map[path] = { code };
+      }
+    };
+
+    ensure(
+      "/index.html",
+      `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Preview</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>`
+    );
+
+    ensure(
+      "/src/main.tsx",
+      `import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App'
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <React.StrictMode><App /></React.StrictMode>
+)`
+    );
+
+    ensure("/src/App.tsx", `export default function App(){ return <h1>Hello from preview</h1> }`);
+
+    files.forEach((file) => {
+      const normalizedPath = file.path.startsWith("/") ? file.path : `/${file.path}`;
+      map[normalizedPath] = {
+        code: file.content ?? "",
+        active: normalizedPath === activeFilePath
+      };
+    });
+
+    ensure(
+      "/tsconfig.json",
+      JSON.stringify(
+        {
+          compilerOptions: {
+            target: "ES2020",
+            module: "ESNext",
+            jsx: "react-jsx",
+            moduleResolution: "Bundler",
+            esModuleInterop: true,
+            strict: true,
+            skipLibCheck: true
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    ensure(
+      "/package.json",
+      JSON.stringify(
+        {
+          name: "generated-react-app",
+          version: "1.0.0",
+          private: true,
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "vite build",
+            preview: "vite preview"
+          },
+          dependencies: {
+            react: "18.2.0",
+            "react-dom": "18.2.0"
+          },
+          devDependencies: {
+            vite: "5.4.0",
+            typescript: "5.6.2"
+          }
+        },
+        null,
+        2
+      )
+    );
+
+    return map;
+  }, [files, activeFilePath]);
 
   return (
     <motion.div
@@ -120,34 +246,54 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
 
       <div className="flex-1 p-8 overflow-auto bg-gradient-to-br from-gray-50 to-gray-100">
         <div className={`${deviceSizes[device]} h-full transition-all duration-300`}>
-          {buildError ? (
+          {loading ? (
             <div className="h-full flex items-center justify-center backdrop-blur-xl bg-white/90 rounded-2xl shadow-2xl border border-white/50">
-              <div className="text-center p-8">
-                <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-red-100 to-orange-100 flex items-center justify-center">
-                  <AlertTriangle className="w-10 h-10 text-red-500" />
-                </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">Preview unavailable</h3>
-                <p className="text-gray-700 text-sm max-w-md mx-auto">{buildError}</p>
+              <div className="text-center p-8 flex flex-col items-center gap-3 text-gray-700">
+                <Loader2 className="w-8 h-8 animate-spin" />
+                <p className="text-sm font-medium">Preparing live preview…</p>
               </div>
             </div>
-          ) : previewHtml ? (
-            <iframe
-              key={refreshKey}
-              srcDoc={previewHtml}
-              className="w-full h-full backdrop-blur-xl bg-white rounded-2xl shadow-2xl border border-white/50"
-              title="App Preview"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-modals"
-            />
-          ) : (
+          ) : status ? (
             <div className="h-full flex items-center justify-center backdrop-blur-xl bg-white/90 rounded-2xl shadow-2xl border border-white/50">
               <div className="text-center p-8">
                 <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center">
-                  <Monitor className="w-10 h-10 text-purple-600" />
+                  <status.icon className={`w-10 h-10 ${status.kind === "error" ? "text-red-500" : "text-purple-600"}`} />
                 </div>
-                <h3 className="text-2xl font-bold text-gray-900 mb-2">No preview yet</h3>
-                <p className="text-gray-700 text-sm">Generate files with the assistant or select a project to preview.</p>
+                <h3 className="text-2xl font-bold text-gray-900 mb-2">{status.heading}</h3>
+                <p className="text-gray-700 text-sm max-w-md mx-auto">{status.message}</p>
               </div>
             </div>
+          ) : (
+            <Sandpack
+              key={refreshKey}
+              template="react-ts"
+              files={sandpackFiles}
+              options={{
+                autorun: true,
+                recompileMode: "delayed",
+                recompileDelay: 300,
+                showTabs: false,
+                externalResources: [],
+                classes: {
+                  preview: "h-full"
+                }
+              }}
+              customSetup={{
+                dependencies: {
+                  react: "18.2.0",
+                  "react-dom": "18.2.0"
+                },
+                entry: "/src/main.tsx"
+              }}
+            >
+              <SandpackLayout style={{ height: "100%" }}>
+                <SandpackPreview
+                  style={{ height: "100%" }}
+                  showOpenInCodeSandbox={false}
+                  showRefreshButton={false}
+                />
+              </SandpackLayout>
+            </Sandpack>
           )}
         </div>
       </div>
