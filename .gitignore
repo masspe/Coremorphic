@@ -6,6 +6,11 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+data.sqlite
+data.sqlite-wal
+package-lock.json
+yarn.lock
+data.sqlite-shm
 
 node_modules
 dist
