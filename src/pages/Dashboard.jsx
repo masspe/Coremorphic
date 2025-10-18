@@ -116,19 +116,30 @@ export default function Dashboard() {
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {statCards.map((card) => (
           <div key={card.title} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-            <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.accent} text-white shadow-lg`}> 
+            <div
+              className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.accent} text-white shadow-lg`}
+            >
               <card.icon className="h-5 w-5" />
             </div>
-          ))}
-        </div>
-      ) : projects.length === 0 ? (
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="backdrop-blur-xl bg-white/20 border border-white/30 rounded-2xl p-16 shadow-2xl text-center"
-        >
-          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 border border-white/30 flex items-center justify-center">
-            <Sparkles className="w-12 h-12 text-gray-800" />
+            <div className="mt-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-500">{card.title}</h2>
+                <p className="text-2xl font-semibold text-slate-900">{card.value}</p>
+              </div>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
+                  card.trend === "up" ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-500"
+                }`}
+              >
+                {card.trend === "up" ? (
+                  <ArrowUpRight className="h-3 w-3" />
+                ) : (
+                  <ArrowDownRight className="h-3 w-3" />
+                )}
+                {card.change}
+              </span>
+            </div>
+            <p className="mt-2 text-xs text-slate-400">{card.subtitle}</p>
           </div>
         ))}
       </section>
