@@ -506,6 +506,93 @@ const applySort = (items, sort) => {
   });
 };
 
+const normaliseAppId = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const formatAppFileRecord = (entity) => {
+  if (!entity) {
+    return null;
+  }
+
+  const payload = entity.data ?? {};
+  const resolvedAppId = normaliseAppId(payload.app_id ?? payload.appId);
+
+  return {
+    id: entity.id,
+    appId: resolvedAppId,
+    app_id: resolvedAppId,
+    name: typeof payload.name === 'string' ? payload.name : payload.path ?? 'Untitled.jsx',
+    path: typeof payload.path === 'string' ? payload.path : payload.name ?? 'Untitled.jsx',
+    type: typeof payload.type === 'string' ? payload.type : 'file',
+    language: typeof payload.language === 'string' ? payload.language : 'javascript',
+    content: typeof payload.content === 'string' ? payload.content : '',
+    createdAt: entity.createdAt,
+    updatedAt: entity.updatedAt
+  };
+};
+
+const listAppFileEntities = async (appId) => {
+  const trimmedAppId = normaliseAppId(appId);
+  if (!trimmedAppId) {
+    return [];
+  }
+
+  const entities = await entityStore.findMany({ where: { type: 'AppFile' } });
+  return entities
+    .map(formatAppFileRecord)
+    .filter((record) => record && normaliseAppId(record.appId) === trimmedAppId);
+};
+
+const findAppFileEntity = async (appId, filePath) => {
+  const trimmedAppId = normaliseAppId(appId);
+  const trimmedPath = typeof filePath === 'string' ? filePath.trim() : '';
+  if (!trimmedAppId || !trimmedPath) {
+    return null;
+  }
+
+  const entities = await entityStore.findMany({ where: { type: 'AppFile' } });
+  return entities.find((entity) => {
+    const payload = entity.data ?? {};
+    const entityAppId = normaliseAppId(payload.app_id ?? payload.appId);
+    const entityPath = typeof payload.path === 'string' ? payload.path.trim() : '';
+    return entityAppId === trimmedAppId && entityPath === trimmedPath;
+  });
+};
+
+const groupFilesByCategory = (files) => {
+  const groups = {
+    pages: [],
+    components: [],
+    entities: [],
+    functions: [],
+    agents: [],
+    layout: [],
+    other: []
+  };
+
+  files.forEach((file) => {
+    if (!file) return;
+    const { content, ...rest } = file;
+    const key =
+      file.type === 'page'
+        ? 'pages'
+        : file.type === 'component'
+        ? 'components'
+        : file.type === 'entity'
+        ? 'entities'
+        : file.type === 'function'
+        ? 'functions'
+        : file.type === 'agent'
+        ? 'agents'
+        : file.type === 'layout'
+        ? 'layout'
+        : 'other';
+
+    groups[key].push(rest);
+  });
+
+  return groups;
+};
+
 const matchesFilter = (item, filter) => {
   if (!filter || Object.keys(filter).length === 0) return true;
   return Object.entries(filter).every(([key, expected]) => {
@@ -674,6 +761,109 @@ app.post('/api/functions/:name', async (req, res, next) => {
           res.status(500).json({ error: error.message || 'Failed to generate app code' });
         }
         break;
+      case 'listAppFiles': {
+        const { appId } = payload ?? {};
+        const trimmedAppId = normaliseAppId(appId);
+        if (!trimmedAppId) {
+          res.status(400).json({ error: 'appId is required to list files.' });
+          break;
+        }
+
+        const files = await listAppFileEntities(trimmedAppId);
+        res.json({ data: { files: groupFilesByCategory(files) } });
+        break;
+      }
+      case 'getFileContent': {
+        const { appId, filePath } = payload ?? {};
+        const record = await findAppFileEntity(appId, filePath);
+        if (!record) {
+          res.status(404).json({ error: 'File not found for the provided app.' });
+          break;
+        }
+
+        const formatted = formatAppFileRecord(record);
+        res.json({
+          data: {
+            id: formatted.id,
+            path: formatted.path,
+            language: formatted.language,
+            content: formatted.content
+          }
+        });
+        break;
+      }
+      case 'updateFileContent': {
+        const { appId, filePath, content } = payload ?? {};
+        const existing = await findAppFileEntity(appId, filePath);
+        if (!existing) {
+          res.status(404).json({ error: 'File not found for the provided app.' });
+          break;
+        }
+
+        const updated = await entityStore.update({
+          where: { id: existing.id },
+          data: {
+            type: 'AppFile',
+            data: {
+              ...(existing.data ?? {}),
+              content: typeof content === 'string' ? content : existing.data?.content ?? '',
+              app_id: normaliseAppId(appId),
+              appId: normaliseAppId(appId)
+            }
+          }
+        });
+
+        res.json({ data: formatAppFileRecord(updated) });
+        break;
+      }
+      case 'createAppFile': {
+        const {
+          appId,
+          name,
+          path: filePath,
+          type: fileType,
+          language,
+          content
+        } = payload ?? {};
+
+        const trimmedAppId = normaliseAppId(appId);
+        if (!trimmedAppId) {
+          res.status(400).json({ error: 'appId is required to create a file.' });
+          break;
+        }
+
+        const resolvedPath = typeof filePath === 'string' ? filePath.trim() : '';
+        if (!resolvedPath) {
+          res.status(400).json({ error: 'path is required to create a file.' });
+          break;
+        }
+
+        const existing = await findAppFileEntity(trimmedAppId, resolvedPath);
+        const filePayload = {
+          name: typeof name === 'string' ? name : resolvedPath,
+          path: resolvedPath,
+          type: typeof fileType === 'string' ? fileType : 'file',
+          language: typeof language === 'string' ? language : 'javascript',
+          content: typeof content === 'string' ? content : existing?.data?.content ?? '',
+          app_id: trimmedAppId,
+          appId: trimmedAppId
+        };
+
+        const record = existing
+          ? await entityStore.update({
+              where: { id: existing.id },
+              data: { type: 'AppFile', data: { ...(existing.data ?? {}), ...filePayload } }
+            })
+          : await entityStore.create({
+              data: {
+                type: 'AppFile',
+                data: filePayload
+              }
+            });
+
+        res.status(existing ? 200 : 201).json({ data: formatAppFileRecord(record) });
+        break;
+      }
       case 'generateEntitySchema':
         res.json({ schema: { name: payload?.name ?? 'Entity', fields: [] } });
         break;
@@ -690,10 +880,6 @@ app.post('/api/functions/:name', async (req, res, next) => {
       case 'generateTestCase':
       case 'runTestSuite':
       case 'runWorkflow':
-      case 'listAppFiles':
-      case 'getFileContent':
-      case 'updateFileContent':
-      case 'createAppFile':
       case 'exportAppToZip':
       case 'renderLivePage':
       case 'createAPIKey':
