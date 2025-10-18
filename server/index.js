@@ -6,7 +6,7 @@ import multer from 'multer';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { PrismaClient } from '@prisma/client';
+import { MongoClient, ObjectId } from 'mongodb';
 import crypto from 'crypto';
 
 dotenv.config();
@@ -18,7 +18,11 @@ if (!process.env.DATABASE_URL) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const prisma = new PrismaClient();
+const mongoClient = new MongoClient(process.env.DATABASE_URL, {
+  serverSelectionTimeoutMS: 5000
+});
+let entityCollection = null;
+let mongoInitialised = null;
 const fsPromises = fs.promises;
 const app = express();
 
@@ -345,10 +349,66 @@ class FileEntityStore {
   }
 }
 
-let prismaAvailable = true;
-let prismaWarningLogged = false;
+let mongoAvailable = true;
+let mongoWarningLogged = false;
 
 let fileStoreInstance = null;
+
+const logFallbackWarning = (error) => {
+  if (mongoWarningLogged) return;
+  mongoWarningLogged = true;
+  const reason = error?.message ? ` (${error.message})` : '';
+  console.warn(
+    `MongoDB connection unavailable${reason}. Falling back to local file storage at ${fileStorePath}`
+  );
+};
+
+const disableMongo = async (error) => {
+  if (!mongoAvailable && !entityCollection) return;
+  mongoAvailable = false;
+  entityCollection = null;
+  logFallbackWarning(error);
+  try {
+    await mongoClient.close();
+  } catch (closeError) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('Failed to close MongoDB client cleanly:', closeError.message);
+    }
+  }
+};
+
+const initialiseMongo = () => {
+  if (!mongoInitialised) {
+    mongoInitialised = (async () => {
+      try {
+        await mongoClient.connect();
+        const database = mongoClient.db();
+        entityCollection = database.collection('entities');
+        await entityCollection.createIndex({ type: 1 }).catch(() => {});
+        mongoAvailable = true;
+      } catch (error) {
+        await disableMongo(error);
+        throw error;
+      }
+    })();
+  }
+  return mongoInitialised;
+};
+
+const ensureMongoCollection = async () => {
+  if (!mongoAvailable) {
+    return false;
+  }
+  if (!entityCollection) {
+    try {
+      await initialiseMongo();
+    } catch (error) {
+      await disableMongo(error);
+      return false;
+    }
+  }
+  return Boolean(entityCollection);
+};
 
 const generateEntityId = () => {
   if (typeof crypto.randomUUID === 'function') {
@@ -364,108 +424,154 @@ const getFileStore = () => {
   return fileStoreInstance;
 };
 
-const shouldFallbackToFileStore = (error) => {
-  if (!error) return false;
-  if (error.code === 'P2031') {
-    return true;
+const normaliseDate = (value) => {
+  if (!value) return new Date();
+  return value instanceof Date ? value : new Date(value);
+};
+
+const toEntityFromMongo = (document) => {
+  if (!document) return null;
+  const idValue = document._id;
+  const id = typeof idValue?.toString === 'function' ? idValue.toString() : String(idValue);
+  return {
+    id,
+    type: document.type,
+    data: document.data ?? {},
+    createdAt: normaliseDate(document.createdAt),
+    updatedAt: normaliseDate(document.updatedAt)
+  };
+};
+
+const buildIdFilter = (id) => {
+  if (!id) return null;
+  if (ObjectId.isValid(id)) {
+    return { $or: [{ _id: new ObjectId(id) }, { _id: id }] };
   }
-  const message = (error.message ?? '').toLowerCase();
-  return (
-    message.includes('replica set') ||
-    message.includes('transaction numbers are only allowed on a replica set')
-  );
-};
-
-const logFallbackWarning = () => {
-  if (prismaWarningLogged) return;
-  prismaWarningLogged = true;
-  console.warn(
-    'Prisma MongoDB client requires a replica set for transactions. Falling back to local file storage at',
-    fileStorePath
-  );
-};
-
-const disablePrisma = () => {
-  if (!prismaAvailable) return;
-  prismaAvailable = false;
-  logFallbackWarning();
-  prisma
-    .$disconnect()
-    .catch(() => {});
+  return { _id: id };
 };
 
 const entityStore = {
-  async findMany(args) {
-    if (prismaAvailable) {
+  async findMany({ where = {} } = {}) {
+    if (await ensureMongoCollection()) {
       try {
-        return await prisma.entity.findMany(args);
-      } catch (error) {
-        if (shouldFallbackToFileStore(error)) {
-          disablePrisma();
-          return getFileStore().findMany(args);
+        const filter = {};
+        if (typeof where.type === 'string') {
+          filter.type = where.type;
         }
-        throw error;
+        const documents = await entityCollection.find(filter).toArray();
+        return documents.map(toEntityFromMongo);
+      } catch (error) {
+        await disableMongo(error);
+        return getFileStore().findMany({ where });
       }
     }
-    return getFileStore().findMany(args);
+    return getFileStore().findMany({ where });
   },
-  async findUnique(args) {
-    if (prismaAvailable) {
+  async findUnique({ where = {} } = {}) {
+    const { id } = where;
+    if (await ensureMongoCollection()) {
       try {
-        return await prisma.entity.findUnique(args);
-      } catch (error) {
-        if (shouldFallbackToFileStore(error)) {
-          disablePrisma();
-          return getFileStore().findUnique(args);
+        const filter = buildIdFilter(id);
+        if (!filter) {
+          return null;
         }
-        throw error;
+        const document = await entityCollection.findOne(filter);
+        return toEntityFromMongo(document);
+      } catch (error) {
+        await disableMongo(error);
+        return getFileStore().findUnique({ where });
       }
     }
-    return getFileStore().findUnique(args);
+    return getFileStore().findUnique({ where });
   },
-  async create(args) {
-    if (prismaAvailable) {
+  async create({ data }) {
+    if (await ensureMongoCollection()) {
       try {
-        return await prisma.entity.create(args);
-      } catch (error) {
-        if (shouldFallbackToFileStore(error)) {
-          disablePrisma();
-          return getFileStore().create(args);
+        const now = new Date();
+        const document = {
+          type: data.type,
+          data: data.data ?? {},
+          createdAt: now,
+          updatedAt: now
+        };
+        if (data?.id) {
+          document._id = data.id;
         }
-        throw error;
+        const result = await entityCollection.insertOne(document);
+        const insertedId = result.insertedId ?? document._id;
+        return toEntityFromMongo({ ...document, _id: insertedId });
+      } catch (error) {
+        await disableMongo(error);
+        return getFileStore().create({ data });
       }
     }
-    return getFileStore().create(args);
+    return getFileStore().create({ data });
   },
-  async update(args) {
-    if (prismaAvailable) {
+  async update({ where = {}, data }) {
+    const { id } = where;
+    if (!id) {
+      throw new Error('Entity id is required for updates');
+    }
+    if (await ensureMongoCollection()) {
       try {
-        return await prisma.entity.update(args);
-      } catch (error) {
-        if (shouldFallbackToFileStore(error)) {
-          disablePrisma();
-          return getFileStore().update(args);
+        const filter = buildIdFilter(id);
+        if (!filter) {
+          throw new Error('Entity id is required for updates');
         }
-        throw error;
+        const updateDoc = {
+          $set: {
+            type: data.type,
+            data: data.data ?? {},
+            updatedAt: new Date()
+          }
+        };
+        const result = await entityCollection.findOneAndUpdate(filter, updateDoc, {
+          returnDocument: 'after'
+        });
+        if (!result.value) {
+          throw new Error('Entity not found');
+        }
+        return toEntityFromMongo(result.value);
+      } catch (error) {
+        if (error.message === 'Entity not found' || error.message === 'Entity id is required for updates') {
+          throw error;
+        }
+        await disableMongo(error);
+        return getFileStore().update({ where, data });
       }
     }
-    return getFileStore().update(args);
+    return getFileStore().update({ where, data });
   },
-  async delete(args) {
-    if (prismaAvailable) {
+  async delete({ where = {} } = {}) {
+    const { id } = where;
+    if (!id) {
+      throw new Error('Entity id is required for deletion');
+    }
+    if (await ensureMongoCollection()) {
       try {
-        return await prisma.entity.delete(args);
-      } catch (error) {
-        if (shouldFallbackToFileStore(error)) {
-          disablePrisma();
-          return getFileStore().delete(args);
+        const filter = buildIdFilter(id);
+        const result = await entityCollection.findOneAndDelete(filter);
+        if (!result.value) {
+          throw new Error('Entity not found');
         }
-        throw error;
+        return toEntityFromMongo(result.value);
+      } catch (error) {
+        if (error.message === 'Entity not found') {
+          throw error;
+        }
+        await disableMongo(error);
+        return getFileStore().delete({ where });
       }
     }
-    return getFileStore().delete(args);
+    return getFileStore().delete({ where });
   }
 };
+
+initialiseMongo()
+  .then(() => {
+    console.log(`MongoDB connection established at ${DATABASE_URL}`);
+  })
+  .catch(() => {});
 
 app.use('/uploads', express.static(uploadsDir));
 
@@ -984,15 +1090,31 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Coremorphic backend listening on http://localhost:${PORT}`);
-  console.log(`Connected to database at ${DATABASE_URL}`);
+  if (mongoAvailable && entityCollection) {
+    console.log(`Connected to MongoDB at ${DATABASE_URL}`);
+  } else {
+    console.log(`MongoDB connection not available. Using local file store at ${fileStorePath}`);
+  }
 });
 
+const closeMongoClient = async () => {
+  try {
+    await mongoClient.close();
+  } catch (error) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.warn('Failed to close MongoDB client on shutdown:', error.message);
+    }
+  }
+  mongoAvailable = false;
+  entityCollection = null;
+};
+
 process.on('SIGINT', async () => {
-  await prisma.$disconnect();
+  await closeMongoClient();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  await prisma.$disconnect();
+  await closeMongoClient();
   process.exit(0);
 });
