@@ -39,6 +39,22 @@ const PREVIEW_ENTRY_CANDIDATES = [
   "/src/App.jsx"
 ];
 
+const DEFAULT_VITE_CONFIG_JS = `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+`;
+
+const DEFAULT_VITE_CONFIG_TS = `import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+});
+`;
+
 const OPTIONAL_PREVIEW_DEV_DEPENDENCIES = [
   "tailwindcss",
   "postcss",
@@ -167,26 +183,28 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
     const usesTypeScript = entry.endsWith(".ts") || entry.endsWith(".tsx");
     const devDependencies = parsedPackage?.devDependencies ?? {};
 
+    const ensureDependency = (name, fallback) => {
+      if (!dependencies[name]) {
+        dependencies[name] = devDependencies[name] || fallback;
+      }
+    };
+
     if (usesTypeScript) {
-      if (!dependencies.typescript) {
-        dependencies.typescript = devDependencies.typescript || "5.6.2";
-      }
-      if (!dependencies["@types/react"]) {
-        dependencies["@types/react"] = devDependencies["@types/react"] || "18.3.3";
-      }
-      if (!dependencies["@types/react-dom"]) {
-        dependencies["@types/react-dom"] = devDependencies["@types/react-dom"] || "18.3.3";
-      }
+      ensureDependency("typescript", "5.6.2");
+      ensureDependency("@types/react", "18.3.3");
+      ensureDependency("@types/react-dom", "18.3.3");
     }
 
-    if (!dependencies.vite) {
-      dependencies.vite = devDependencies.vite || "5.4.0";
-    }
+    ensureDependency("vite", "5.4.0");
+    ensureDependency("@vitejs/plugin-react", "4.3.4");
+
+    const template = usesTypeScript ? "vite-react-ts" : "vite-react";
 
     return {
       entry,
-      template: usesTypeScript ? "react-ts" : "react",
-      dependencies
+      template,
+      dependencies,
+      bundlerEntry: template.startsWith("vite-") ? "/index.html" : entry
     };
   }, [files]);
 
@@ -219,7 +237,7 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
 </html>`
     );
 
-    if (sandpackConfig.template === "react") {
+    if (sandpackConfig.template === "vite-react") {
       ensure(
         "/src/main.jsx",
         `import React from 'react';
@@ -240,6 +258,10 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   return <h1>Hello from preview</h1>;
 }
 `
+      );
+      ensure(
+        "/vite.config.js",
+        DEFAULT_VITE_CONFIG_JS
       );
     } else {
       ensure(
@@ -286,6 +308,16 @@ export default App;
           2
         )
       );
+
+      ensure(
+        "/vite.config.ts",
+        DEFAULT_VITE_CONFIG_TS
+      );
+
+      ensure(
+        "/src/vite-env.d.ts",
+        `/// <reference types="vite/client" />`
+      );
     }
 
     files.forEach((file) => {
@@ -309,7 +341,8 @@ export default App;
           scripts: {
             dev: "vite",
             build: "vite build",
-            preview: "vite preview"
+            preview: "vite preview",
+            start: "vite"
           },
           dependencies: fallbackDependencies
         },
@@ -444,7 +477,7 @@ export default App;
                 }}
                 customSetup={{
                   dependencies: sandpackConfig.dependencies,
-                  entry: sandpackConfig.entry
+                  entry: sandpackConfig.bundlerEntry
                 }}
               >
                 <div className="h-full">
