@@ -1,10 +1,20 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Sandpack,
   SandpackPreview,
-  SandpackLayout
+  SandpackLayout,
+  useErrorMessage
 } from "@codesandbox/sandpack-react";
-import { X, Monitor, Smartphone, Tablet, RefreshCw, AlertTriangle, Loader2 } from "lucide-react";
+import {
+  X,
+  Monitor,
+  Smartphone,
+  Tablet,
+  RefreshCw,
+  AlertTriangle,
+  Loader2,
+  Sparkles
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { backend } from "@/api/backendClient";
@@ -16,15 +26,31 @@ const deviceSizes = {
   mobile: "w-[375px] h-[667px] mx-auto"
 };
 
+const SandpackErrorBridge = ({ onErrorChange }) => {
+  const errorMessage = useErrorMessage();
+  const previousMessageRef = useRef();
+
+  useEffect(() => {
+    if (previousMessageRef.current !== errorMessage) {
+      onErrorChange?.(errorMessage);
+      previousMessageRef.current = errorMessage;
+    }
+  }, [errorMessage, onErrorChange]);
+
+  return null;
+};
+
 export default function PreviewPanel({ projectId, selectedFile, onClose }) {
   const [device, setDevice] = useState("desktop");
   const [refreshKey, setRefreshKey] = useState(0);
   const [files, setFiles] = useState([]);
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [runtimeError, setRuntimeError] = useState(null);
 
   const handleRefresh = () => {
     setRefreshKey((key) => key + 1);
+    setRuntimeError(null);
   };
 
   useEffect(() => {
@@ -38,11 +64,13 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
           message: "Open a project from the dashboard to start previewing.",
           icon: Monitor
         });
+        setRuntimeError(null);
         return;
       }
 
       setLoading(true);
       setStatus(null);
+      setRuntimeError(null);
       try {
         const response = await backend.files.list(projectId);
         const fileList = Array.isArray(response) ? response : [];
@@ -180,6 +208,25 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     return map;
   }, [files, activeFilePath]);
 
+  const handleRuntimeErrorChange = useCallback((message) => {
+    setRuntimeError(message || null);
+  }, []);
+
+  const sendErrorToAssistant = useCallback((message) => {
+    if (!message) return;
+
+    const prompt = `The live preview encountered the following error:\n\n${message}\n\nPlease diagnose the issue and propose the necessary code changes to resolve it.`;
+
+    window.dispatchEvent(
+      new CustomEvent("ai-assistant:submit", {
+        detail: {
+          prompt,
+          autoSend: true
+        }
+      })
+    );
+  }, []);
+
   return (
     <motion.div
       initial={{ x: "100%" }}
@@ -260,39 +307,81 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 </div>
                 <h3 className="text-2xl font-bold text-gray-900 mb-2">{status.heading}</h3>
                 <p className="text-gray-700 text-sm max-w-md mx-auto">{status.message}</p>
+                {status.kind === "error" && status.message && (
+                  <Button
+                    className="mt-6 bg-purple-600 hover:bg-purple-700 text-white"
+                    onClick={() => sendErrorToAssistant(status.message)}
+                  >
+                    <Sparkles className="w-4 h-4 mr-2" /> Ask AI to fix it
+                  </Button>
+                )}
               </div>
             </div>
           ) : (
-            <Sandpack
-              key={refreshKey}
-              template="react-ts"
-              files={sandpackFiles}
-              options={{
-                autorun: true,
-                recompileMode: "delayed",
-                recompileDelay: 300,
-                showTabs: false,
-                externalResources: [],
-                classes: {
-                  preview: "h-full"
-                }
-              }}
-              customSetup={{
-                dependencies: {
-                  react: "18.2.0",
-                  "react-dom": "18.2.0"
-                },
-                entry: "/src/main.tsx"
-              }}
-            >
-              <SandpackLayout style={{ height: "100%" }}>
-                <SandpackPreview
-                  style={{ height: "100%" }}
-                  showOpenInCodeSandbox={false}
-                  showRefreshButton={false}
-                />
-              </SandpackLayout>
-            </Sandpack>
+            <div className="relative h-full">
+              <Sandpack
+                key={refreshKey}
+                template="react-ts"
+                files={sandpackFiles}
+                options={{
+                  autorun: true,
+                  recompileMode: "delayed",
+                  recompileDelay: 300,
+                  showTabs: false,
+                  externalResources: [],
+                  classes: {
+                    preview: "h-full"
+                  }
+                }}
+                customSetup={{
+                  dependencies: {
+                    react: "18.2.0",
+                    "react-dom": "18.2.0"
+                  },
+                  entry: "/src/main.tsx"
+                }}
+              >
+                <SandpackLayout style={{ height: "100%" }}>
+                  <SandpackPreview
+                    style={{ height: "100%" }}
+                    showOpenInCodeSandbox={false}
+                    showRefreshButton={false}
+                    showNavigator={false}
+                    showSandpackErrorOverlay={false}
+                  />
+                </SandpackLayout>
+                <SandpackErrorBridge onErrorChange={handleRuntimeErrorChange} />
+              </Sandpack>
+
+              {runtimeError && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="backdrop-blur-xl bg-white/95 border border-red-200 rounded-2xl shadow-2xl max-w-xl mx-auto p-8 text-center space-y-4">
+                    <div className="flex items-center justify-center gap-3 text-red-600">
+                      <AlertTriangle className="w-6 h-6" />
+                      <span className="text-lg font-semibold">Runtime error in preview</span>
+                    </div>
+                    <p className="text-sm text-gray-700 whitespace-pre-wrap text-left">
+                      {runtimeError}
+                    </p>
+                    <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                      <Button
+                        variant="outline"
+                        onClick={handleRefresh}
+                        className="border-red-200 text-red-600 hover:bg-red-50"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-2" /> Retry preview
+                      </Button>
+                      <Button
+                        className="bg-purple-600 hover:bg-purple-700 text-white"
+                        onClick={() => sendErrorToAssistant(runtimeError)}
+                      >
+                        <Sparkles className="w-4 h-4 mr-2" /> Ask AI to fix it
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>

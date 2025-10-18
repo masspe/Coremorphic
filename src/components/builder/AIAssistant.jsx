@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Sparkles, Send, Loader2, MessageSquare, FileText, StickyNote, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -53,12 +53,13 @@ export default function AIAssistant({ projectId }) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const appendMessage = (message) => {
+  const appendMessage = useCallback((message) => {
     setMessages((prev) => [...prev, message]);
-  };
+  }, []);
 
-  const handleSend = async () => {
-    const trimmed = input.trim();
+  const handleSend = useCallback(async (overridePrompt) => {
+    const promptToSend = typeof overridePrompt === "string" ? overridePrompt : input;
+    const trimmed = promptToSend.trim();
     if (!trimmed || !projectId || isGenerating) {
       return;
     }
@@ -109,7 +110,7 @@ export default function AIAssistant({ projectId }) {
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, [appendMessage, input, projectId, isGenerating, memory, selectedModel]);
 
   const handleSaveMemory = async () => {
     if (!projectId) return;
@@ -130,6 +131,24 @@ export default function AIAssistant({ projectId }) {
       handleSend();
     }
   };
+
+  useEffect(() => {
+    const handleExternalPrompt = (event) => {
+      const detail = event.detail ?? {};
+      if (!detail.prompt) {
+        return;
+      }
+
+      setInput(detail.prompt);
+
+      if (detail.autoSend) {
+        handleSend(detail.prompt);
+      }
+    };
+
+    window.addEventListener("ai-assistant:submit", handleExternalPrompt);
+    return () => window.removeEventListener("ai-assistant:submit", handleExternalPrompt);
+  }, [handleSend]);
 
   return (
     <div className="w-96 border-r border-white/30 backdrop-blur-xl bg-white/20 flex flex-col">
