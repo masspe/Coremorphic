@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
-  Sandpack,
+  SandpackProvider,
   SandpackPreview,
-  SandpackLayout,
   useErrorMessage
 } from "@codesandbox/sandpack-react";
 import {
@@ -312,14 +311,14 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                     className="mt-6 bg-purple-600 hover:bg-purple-700 text-white"
                     onClick={() => sendErrorToAssistant(status.message)}
                   >
-                    <Sparkles className="w-4 h-4 mr-2" /> Ask AI to fix it
+                    <Sparkles className="w-4 h-4 mr-2" /> Resoleve with AI
                   </Button>
                 )}
               </div>
             </div>
           ) : (
             <div className="relative h-full">
-              <Sandpack
+              <SandpackProvider
                 key={refreshKey}
                 template="react-ts"
                 files={sandpackFiles}
@@ -327,11 +326,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   autorun: true,
                   recompileMode: "delayed",
                   recompileDelay: 300,
-                  showTabs: false,
-                  externalResources: [],
-                  classes: {
-                    preview: "h-full"
-                  }
+                  externalResources: []
                 }}
                 customSetup={{
                   dependencies: {
@@ -341,17 +336,18 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                   entry: "/src/main.tsx"
                 }}
               >
-                <SandpackLayout style={{ height: "100%" }}>
+                <div className="h-full">
                   <SandpackPreview
                     style={{ height: "100%" }}
                     showOpenInCodeSandbox={false}
                     showRefreshButton={false}
                     showNavigator={false}
                     showSandpackErrorOverlay={false}
+                    className="h-full"
                   />
-                </SandpackLayout>
+                </div>
                 <SandpackErrorBridge onErrorChange={handleRuntimeErrorChange} />
-              </Sandpack>
+              </SandpackProvider>
 
               {runtimeError && (
                 <div className="absolute inset-0 flex items-center justify-center">
@@ -375,7 +371,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                         className="bg-purple-600 hover:bg-purple-700 text-white"
                         onClick={() => sendErrorToAssistant(runtimeError)}
                       >
-                        <Sparkles className="w-4 h-4 mr-2" /> Ask AI to fix it
+                        <Sparkles className="w-4 h-4 mr-2" /> Resoleve with AI
                       </Button>
                     </div>
                   </div>
