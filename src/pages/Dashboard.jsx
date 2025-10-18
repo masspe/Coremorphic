@@ -119,23 +119,16 @@ export default function Dashboard() {
             <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${card.accent} text-white shadow-lg`}> 
               <card.icon className="h-5 w-5" />
             </div>
-            <div className="mt-4 flex items-center justify-between">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">{card.title}</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-900">{card.value}</p>
-              </div>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-semibold ${
-                  card.trend === "up"
-                    ? "bg-emerald-50 text-emerald-500"
-                    : "bg-rose-50 text-rose-500"
-                }`}
-              >
-                {card.trend === "up" ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
-                {card.change}
-              </span>
-            </div>
-            <p className="mt-3 text-xs font-medium text-slate-400">{card.subtitle}</p>
+          ))}
+        </div>
+      ) : projects.length === 0 ? (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="backdrop-blur-xl bg-white/20 border border-white/30 rounded-2xl p-16 shadow-2xl text-center"
+        >
+          <div className="w-24 h-24 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/30 to-pink-500/30 border border-white/30 flex items-center justify-center">
+            <Sparkles className="w-12 h-12 text-gray-800" />
           </div>
         ))}
       </section>
