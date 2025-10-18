@@ -5,6 +5,7 @@ import bodyParser from "body-parser";
 import { z } from "zod";
 import path from "path";
 import esbuild from "esbuild";
+import crypto from "crypto";
 import { Database } from "./lib/db.js";
 import { OpenAIClient } from "./lib/openai.js";
 
@@ -274,7 +275,24 @@ Rules:
 - If the user wants UI libs, include install hints in notes.
 Output only valid JSON. No markdown fences.`;
 
-  const developerMessage = `Project memory/context (may include constraints or prior choices):\n${memory}\n\nIf relevant, respect prior file structure and style.`;
+  const projectFiles = db.listFiles(projectId);
+  const fileSummary = projectFiles
+    .map((file) => {
+      const normalizedPath = normaliseStoredPath(file.path);
+      const hash = crypto
+        .createHash("sha256")
+        .update(file.content ?? "")
+        .digest("hex")
+        .slice(0, 12);
+      const length = (file.content ?? "").length;
+      return `- ${normalizedPath} (${length} chars, sha256:${hash})`;
+    })
+    .join("\n");
+
+  const memorySection = memory && memory.trim() ? memory : "(empty)";
+  const filesSection = fileSummary || "- (no files yet)";
+
+  const developerMessage = `Project memory/context (may include constraints or prior choices):\n${memorySection}\n\nCurrent project files:\n${filesSection}\n\nIf relevant, respect prior file structure and style.`;
   const userMessage = `Prompt:\n${prompt}\n\nAdditional instructions (optional):\n${instructions ?? ""}`;
 
   try {
