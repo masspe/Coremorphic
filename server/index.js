@@ -12,7 +12,7 @@ import { Server as SocketIOServer } from "socket.io";
 import { createClient as createLiveblocksClient } from "@liveblocks/node";
 import { MetadataServiceClient } from "./lib/db.js";
 import { StorageServiceClient } from "./lib/storage.js";
-import { OpenAIClient } from "./lib/openai.js";
+import { WorkersAIClient } from "./lib/workersAi.js";
 import { SandboxManager } from "./sandbox/orchestrator.js";
 
 const app = express();
@@ -63,7 +63,11 @@ const storage = new StorageServiceClient({
   baseUrl: process.env.STORAGE_SERVICE_URL,
   token: serviceToken || undefined
 });
-const openai = new OpenAIClient({});
+const aiBinding =
+  typeof WORKERS_AI !== "undefined" ? WORKERS_AI : typeof AI !== "undefined" ? AI : undefined;
+const workersAi = new WorkersAIClient({ binding: aiBinding });
+const defaultWorkersModel =
+  process.env.WORKERS_AI_MODEL || process.env.CF_AI_MODEL || "@cf/meta/llama-3-8b-instruct";
 
 const parseNumberEnv = (value) => {
   const parsed = Number(value);
@@ -784,8 +788,8 @@ Rules:
   const userMessage = `Compilation errors to fix:\n${errorSummary}\n\nRelevant file contents:\n${relevantSection}\n\nReturn the updated files as JSON following the specified shape.`;
 
   try {
-    const json = await openai.generateJson(
-      model || process.env.OPENAI_MODEL || "gpt-4o-mini",
+    const json = await workersAi.generateJson(
+      model || defaultWorkersModel,
       systemMessage,
       developerMessage,
       userMessage
@@ -807,7 +811,10 @@ Rules:
     res.json({ ok: true, result: json });
   } catch (error) {
     console.error("Automatic fix failed", error);
-    res.status(500).json({ error: String(error) });
+    res.status(500).json({
+      error: error?.message || "Workers AI request failed",
+      details: error?.details
+    });
   }
 });
 
@@ -855,8 +862,8 @@ Output only valid JSON. No markdown fences.`;
   const userMessage = `Prompt:\n${prompt}\n\nAdditional instructions (optional):\n${instructions ?? ""}`;
 
   try {
-    const json = await openai.generateJson(
-      model || process.env.OPENAI_MODEL || "gpt-4o-mini",
+    const json = await workersAi.generateJson(
+      model || defaultWorkersModel,
       systemMessage,
       developerMessage,
       userMessage
@@ -879,8 +886,11 @@ Output only valid JSON. No markdown fences.`;
 
     res.json({ ok: true, result: json });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: String(error) });
+    console.error("Generate request failed", error);
+    res.status(500).json({
+      error: error?.message || "Workers AI request failed",
+      details: error?.details
+    });
   }
 });
 
