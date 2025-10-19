@@ -1,7 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 
-export default function CodeEditor({ value, onChange, language = 'javascript', readOnly = false }) {
+export default function CodeEditor({
+  value,
+  onChange,
+  language = 'javascript',
+  readOnly = false,
+  scrollPosition
+}) {
   const editorRef = useRef(null);
   const monacoRef = useRef(null);
   const containerRef = useRef(null);
@@ -202,6 +208,29 @@ export default function CodeEditor({ value, onChange, language = 'javascript', r
       monacoRef.current.editor.setTheme(theme);
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (!scrollPosition || !editorRef.current) {
+      return;
+    }
+
+    const { line, column } = scrollPosition;
+    if (typeof line !== 'number' || Number.isNaN(line)) {
+      return;
+    }
+
+    const editor = editorRef.current;
+    const safeColumn = typeof column === 'number' && !Number.isNaN(column) && column > 0 ? column : 1;
+
+    editor.revealLineInCenter(line);
+    editor.setSelection({
+      startLineNumber: line,
+      endLineNumber: line,
+      startColumn: safeColumn,
+      endColumn: safeColumn
+    });
+    editor.focus();
+  }, [scrollPosition]);
 
   const getMonacoLanguage = (lang) => {
     const languageMap = {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Loader2, Save, RefreshCw, FileCode, Search } from "lucide-react";
 import { backend } from "@/api/backendClient";
 import { Button } from "@/components/ui/button";
@@ -17,17 +17,59 @@ export default function CodeSection({ projectId }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(null);
+  const [scrollTarget, setScrollTarget] = useState(null);
+  const filesRef = useRef(files);
 
   useEffect(() => {
+    filesRef.current = files;
+  }, [files]);
+
+  const normalizePath = useCallback((value = "") => value.replace(/^\.\//, "").replace(/^\//, "").replace(/\\/g, "/"), []);
+
+  const selectFile = useCallback((file, scrollPosition = null) => {
+    if (!file) return;
+    setSelectedFile(file);
+    setFileContent(file.content ?? "");
+    setOriginalContent(file.content ?? "");
+    setStatus(null);
+    setScrollTarget(scrollPosition);
+    window.dispatchEvent(new CustomEvent("file-selected", { detail: file }));
+  }, []);
+
+  const loadFiles = useCallback(async () => {
     if (!projectId) {
       setFiles([]);
       setSelectedFile(null);
       setFileContent("");
       setOriginalContent("");
-      return;
+      return [];
     }
+
+    try {
+      setLoading(true);
+      const data = await backend.files.list(projectId);
+      const sorted = sortFiles(data ?? []);
+      setFiles(sorted);
+      if (sorted.length > 0) {
+        selectFile(sorted[0], null);
+      } else {
+        setSelectedFile(null);
+        setFileContent("");
+        setOriginalContent("");
+      }
+      return sorted;
+    } catch (error) {
+      console.error("Failed to load files", error);
+      setStatus({ type: "error", message: error.message || "Failed to load files" });
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, selectFile]);
+
+  useEffect(() => {
     loadFiles();
-  }, [projectId]);
+  }, [loadFiles]);
 
   useEffect(() => {
     const refreshHandler = () => {
@@ -38,36 +80,45 @@ export default function CodeSection({ projectId }) {
 
     window.addEventListener("files-updated", refreshHandler);
     return () => window.removeEventListener("files-updated", refreshHandler);
-  }, [projectId]);
+  }, [projectId, loadFiles]);
 
-  const loadFiles = async () => {
-    try {
-      setLoading(true);
-      const data = await backend.files.list(projectId);
-      const sorted = sortFiles(data ?? []);
-      setFiles(sorted);
-      if (sorted.length > 0) {
-        selectFile(sorted[0]);
-      } else {
-        setSelectedFile(null);
-        setFileContent("");
-        setOriginalContent("");
+  useEffect(() => {
+    const handleOpenFile = (event) => {
+      const detail = event.detail ?? {};
+      if (!detail.path) return;
+
+      const normalizedTarget = normalizePath(detail.path);
+
+      const findMatch = (list = []) =>
+        list.find((item) => normalizePath(item.path) === normalizedTarget);
+
+      const applySelection = (file) => {
+        if (!file) return;
+        const scrollPosition = detail.line
+          ? { line: detail.line, column: detail.column || 1 }
+          : null;
+        selectFile(file, scrollPosition);
+      };
+
+      const existing = findMatch(filesRef.current);
+      if (existing) {
+        applySelection(existing);
+        return;
       }
-    } catch (error) {
-      console.error("Failed to load files", error);
-      setStatus({ type: "error", message: error.message || "Failed to load files" });
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const selectFile = (file) => {
-    setSelectedFile(file);
-    setFileContent(file.content ?? "");
-    setOriginalContent(file.content ?? "");
-    setStatus(null);
-    window.dispatchEvent(new CustomEvent("file-selected", { detail: file }));
-  };
+      if (!projectId) return;
+
+      loadFiles().then((updated) => {
+        const refreshed = findMatch(updated);
+        if (refreshed) {
+          applySelection(refreshed);
+        }
+      });
+    };
+
+    window.addEventListener("open-file", handleOpenFile);
+    return () => window.removeEventListener("open-file", handleOpenFile);
+  }, [projectId, loadFiles, selectFile, normalizePath]);
 
   const handleSave = async () => {
     if (!projectId || !selectedFile) return;
@@ -193,11 +244,12 @@ export default function CodeSection({ projectId }) {
 
         <div className="flex-1 min-h-0">
           {selectedFile ? (
-            <CodeEditor
-              language={languageForPath(selectedFile.path)}
-              value={fileContent}
-              onChange={setFileContent}
-            />
+          <CodeEditor
+            language={languageForPath(selectedFile.path)}
+            value={fileContent}
+            onChange={setFileContent}
+            scrollPosition={scrollTarget}
+          />
           ) : (
             <div className="h-full flex items-center justify-center text-gray-600">
               Select a file to view its contents.
