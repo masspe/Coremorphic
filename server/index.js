@@ -2,17 +2,43 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
+import { ClerkExpressWithAuth, clerkClient, requireSession } from "@clerk/express";
 import { z } from "zod";
 import path from "path";
 import esbuild from "esbuild";
 import crypto from "crypto";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
+import { createClient as createLiveblocksClient } from "@liveblocks/node";
 import { Database } from "./lib/db.js";
 import { OpenAIClient } from "./lib/openai.js";
 import { SandboxManager } from "./sandbox/orchestrator.js";
 
 const app = express();
+
+const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
+const clerkSecretKey = process.env.CLERK_SECRET_KEY;
+const isClerkConfigured = Boolean(clerkPublishableKey && clerkSecretKey);
+
+if (isClerkConfigured) {
+  app.use(
+    ClerkExpressWithAuth({
+      publishableKey: clerkPublishableKey,
+      secretKey: clerkSecretKey
+    })
+  );
+} else {
+  console.warn("Clerk keys are not configured. Authentication-sensitive endpoints will be disabled.");
+}
+
+let ensureClerkSession = (_req, res, next) => {
+  res.status(500).json({ error: "Clerk is not configured" });
+};
+
+if (isClerkConfigured) {
+  ensureClerkSession = requireSession();
+}
+
 app.use(cors());
 app.use(bodyParser.json({ limit: "2mb" }));
 
@@ -29,6 +55,13 @@ const sandboxManager = new SandboxManager({
   idleTimeoutMs: parseNumberEnv(process.env.SANDBOX_IDLE_TIMEOUT_MS),
   defaultPreviewPort: parseNumberEnv(process.env.SANDBOX_PREVIEW_PORT)
 });
+
+const liveblocksSecretKey = process.env.LIVEBLOCKS_SECRET_KEY;
+const liveblocksClient = liveblocksSecretKey ? createLiveblocksClient({ secret: liveblocksSecretKey }) : null;
+
+if (!liveblocksSecretKey) {
+  console.warn("Liveblocks secret key is not set. Collaborative rooms will not be available.");
+}
 
 const appServer = createServer(app);
 const io = new SocketIOServer(appServer, {
@@ -477,6 +510,78 @@ app.post("/api/projects", (req, res) => {
   const { name } = req.body ?? {};
   const project = db.createProject(name || "New Project");
   res.json(project);
+});
+
+app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
+  if (!liveblocksClient) {
+    res.status(500).json({ error: "Liveblocks is not configured" });
+    return;
+  }
+
+  const { room } = req.body ?? {};
+  const roomId = typeof room === "string" ? room.trim() : "";
+  if (!roomId) {
+    res.status(400).json({ error: "room is required" });
+    return;
+  }
+
+  if (!roomId.startsWith("project-")) {
+    res.status(400).json({ error: "Invalid room identifier" });
+    return;
+  }
+
+  const projectId = roomId.replace(/^project-/, "");
+  if (!projectId) {
+    res.status(400).json({ error: "Invalid room identifier" });
+    return;
+  }
+
+  const project = db.getProject(projectId);
+  if (!project) {
+    res.status(404).json({ error: "Project not found" });
+    return;
+  }
+
+  const { userId } = req.auth;
+  if (!userId) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  let displayName = "Collaborator";
+  let avatarUrl = null;
+
+  try {
+    const clerkUser = await clerkClient.users.getUser(userId);
+    if (clerkUser) {
+      displayName =
+        clerkUser.fullName ||
+        clerkUser.username ||
+        clerkUser.primaryEmailAddress?.emailAddress ||
+        clerkUser.id ||
+        displayName;
+      avatarUrl = clerkUser.imageUrl || null;
+    }
+  } catch (error) {
+    console.warn("Failed to fetch Clerk user profile", error);
+  }
+
+  try {
+    const session = liveblocksClient.prepareSession(userId, {
+      userInfo: {
+        name: displayName,
+        image: avatarUrl || undefined
+      }
+    });
+
+    session.allow(roomId, session.FULL_ACCESS);
+
+    const { body, status } = await session.authorize();
+    res.status(status).json(body);
+  } catch (error) {
+    console.error("Failed to authorize Liveblocks session", error);
+    res.status(500).json({ error: "Failed to authorize Liveblocks session" });
+  }
 });
 
 app.get("/api/memory/:projectId", (req, res) => {
