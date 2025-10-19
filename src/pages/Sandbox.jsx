@@ -19,6 +19,7 @@ import {
   Terminal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
@@ -551,7 +552,132 @@ function SandboxTerminal() {
 
   const [progress, setProgress] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [commandInput, setCommandInput] = useState("");
+  const [isRunningCommand, setIsRunningCommand] = useState(false);
   const outputRef = useRef(null);
+  const installTriggeredRef = useRef(false);
+  const commandIdRef = useRef(0);
+
+  const getActiveClient = useCallback(() => {
+    const clients = sandpack?.clients ?? {};
+    const [clientId] = Object.keys(clients);
+    return clientId ? clients[clientId] : null;
+  }, [sandpack?.clients]);
+
+  const appendCommandHistory = useCallback((entry) => {
+    const id = `cmd-${commandIdRef.current++}`;
+    setCommandHistory((history) => [...history, { ...entry, id }]);
+    return id;
+  }, []);
+
+  const updateCommandHistory = useCallback((id, updates) => {
+    setCommandHistory((history) =>
+      history.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
+    );
+  }, []);
+
+  const parseShellCommand = useCallback((input) => {
+    const matches = input.match(
+      /(?:[^\s"']+|"(?:\\.|[^"])*"|'(?:\\.|[^'])*')+/g
+    );
+
+    if (!matches || matches.length === 0) {
+      return null;
+    }
+
+    const normalized = matches.map((token) => {
+      if (
+        (token.startsWith("\"") && token.endsWith("\"")) ||
+        (token.startsWith("'") && token.endsWith("'"))
+      ) {
+        return token.slice(1, -1);
+      }
+
+      return token;
+    });
+
+    const [commandName, ...args] = normalized;
+
+    if (!commandName) {
+      return null;
+    }
+
+    return { command: commandName, args };
+  }, []);
+
+  const executeManualCommand = useCallback(
+    async (rawInput) => {
+      const trimmed = rawInput.trim();
+
+      if (!trimmed) {
+        return;
+      }
+
+      const parsed = parseShellCommand(trimmed);
+
+      if (!parsed) {
+        appendCommandHistory({
+          command: trimmed,
+          status: "error",
+          error: "Unable to parse command.",
+          source: "manual"
+        });
+        return;
+      }
+
+      const client = getActiveClient();
+
+      if (!client?.emulatorShellProcess?.runCommand) {
+        appendCommandHistory({
+          command: trimmed,
+          status: "error",
+          error: "Sandbox shell is unavailable.",
+          source: "manual"
+        });
+        return;
+      }
+
+      setIsRunningCommand(true);
+      const historyId = appendCommandHistory({
+        command: trimmed,
+        status: "running",
+        source: "manual"
+      });
+
+      try {
+        await client.emulatorShellProcess.runCommand(
+          parsed.command,
+          parsed.args
+        );
+        updateCommandHistory(historyId, { status: "done" });
+      } catch (error) {
+        updateCommandHistory(historyId, {
+          status: "error",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        setIsRunningCommand(false);
+      }
+    },
+    [appendCommandHistory, getActiveClient, parseShellCommand, updateCommandHistory]
+  );
+
+  const handleCommandSubmit = useCallback(
+    async (event) => {
+      event.preventDefault();
+
+      const value = commandInput.trim();
+
+      if (!value) {
+        return;
+      }
+
+      setCommandInput("");
+      await executeManualCommand(value);
+    },
+    [commandInput, executeManualCommand]
+  );
 
   useEffect(() => {
     const unsubscribe = listen((message) => {
@@ -587,7 +713,38 @@ function SandboxTerminal() {
   const hasLogs = logs.length > 0;
   const logText = logs.map((entry) => entry.data).join("");
 
+  const activeHistoryCommand = useMemo(
+    () => commandHistory.find((entry) => entry.status === "running"),
+    [commandHistory]
+  );
+
+  const baseCommandEntry = useMemo(() => {
+    let commandStatus = "running";
+
+    if (status === "error" || status === "timeout") {
+      commandStatus = "error";
+    } else if (status === "success" || status === "done" || status === "idle") {
+      commandStatus = "done";
+    }
+
+    return {
+      id: "dev-command",
+      command,
+      status: commandStatus,
+      source: "sandbox"
+    };
+  }, [command, status]);
+
+  const commandsForDisplay = useMemo(
+    () => [...commandHistory, baseCommandEntry],
+    [baseCommandEntry, commandHistory]
+  );
+
   const progressLabel = useMemo(() => {
+    if (activeHistoryCommand) {
+      return `Running "${activeHistoryCommand.command}"`;
+    }
+
     if (status === "error" || status === "timeout") {
       return "Dev server encountered an error";
     }
@@ -610,7 +767,50 @@ function SandboxTerminal() {
     }
 
     return "Preparing workspace…";
-  }, [progress, status]);
+  }, [activeHistoryCommand, progress, status]);
+
+  useEffect(() => {
+    if (installTriggeredRef.current) {
+      return;
+    }
+
+    if (
+      progress?.state !== "command_running" ||
+      typeof progress.command !== "string" ||
+      !progress.command.includes("npm run dev")
+    ) {
+      return;
+    }
+
+    const client = getActiveClient();
+
+    if (!client?.emulatorShellProcess?.runCommand) {
+      return;
+    }
+
+    installTriggeredRef.current = true;
+
+    const installCommandId = appendCommandHistory({
+      command: "npm install",
+      status: "running",
+      source: "auto"
+    });
+
+    (async () => {
+      try {
+        await client.emulatorShellProcess.runCommand("npm", ["install"]);
+        updateCommandHistory(installCommandId, { status: "done" });
+        if (typeof restart === "function") {
+          restart();
+        }
+      } catch (error) {
+        updateCommandHistory(installCommandId, {
+          status: "error",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    })();
+  }, [appendCommandHistory, getActiveClient, progress, restart, updateCommandHistory]);
 
   const handleRestart = useCallback(() => {
     if (typeof restart === "function") {
@@ -657,18 +857,62 @@ function SandboxTerminal() {
         className="max-h-64 overflow-auto px-4 py-4 font-mono text-xs leading-relaxed"
         data-testid="sandbox-terminal-output"
       >
-        <pre className="whitespace-pre-wrap">
-          <span className="text-emerald-300">{`> ${command}`}</span>
-          {"\n"}
-          <span className="text-slate-100">
+        <div className="space-y-2">
+          {commandsForDisplay.map((entry) => {
+            const isRunning = entry.status === "running";
+            const isSuccess = entry.status === "done";
+            const isError = entry.status === "error";
+
+            const commandClassName = cn({
+              "text-emerald-300": isSuccess,
+              "text-amber-300": isRunning,
+              "text-rose-300": isError,
+              "text-emerald-200": entry.source === "sandbox" && !isRunning && !isError
+            });
+
+            return (
+              <div key={entry.id} className="whitespace-pre-wrap">
+                <span className={commandClassName}>{`> ${entry.command}`}</span>
+                {isRunning ? "\nRunning…" : null}
+                {isError && entry.error ? (
+                  <>
+                    {"\n"}
+                    <span className="text-rose-300/80">{entry.error}</span>
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
+          <div className="whitespace-pre-wrap text-slate-100">
             {hasLogs ? logText : "Waiting for dev server output…"}
-          </span>
-        </pre>
+          </div>
+        </div>
       </div>
-      <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-xs text-slate-400">
-          Output from the sandboxed Vite development server.
-        </span>
+      <div className="flex flex-col gap-4 border-t border-white/10 px-4 py-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <span className="text-xs text-slate-400">
+            Output from the sandboxed Vite development server.
+          </span>
+          <form
+            onSubmit={handleCommandSubmit}
+            className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
+          >
+            <Input
+              value={commandInput}
+              onChange={(event) => setCommandInput(event.target.value)}
+              placeholder="Enter a shell command"
+              className="border-slate-800 bg-slate-900/60 text-xs text-slate-100 placeholder:text-slate-500"
+            />
+            <Button
+              type="submit"
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={isRunningCommand || commandInput.trim() === ""}
+            >
+              Run command
+            </Button>
+          </form>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
