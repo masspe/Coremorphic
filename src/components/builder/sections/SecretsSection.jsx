@@ -8,7 +8,8 @@ export default function SecretsSection() {
 
   const secrets = [
     { name: "STRIPE_API_KEY", value: "sk_test_••••••••••••••••" },
-    { name: "OPENAI_API_KEY", value: "sk_••••••••••••••••••" },
+    { name: "CF_AI_KEY", value: "cf_ai_••••••••••••••••" },
+    { name: "WORKERS_KEY", value: "cf_workers_••••••••" },
     { name: "DATABASE_URL", value: "postgres://••••••••" },
   ];
 
