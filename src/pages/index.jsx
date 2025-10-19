@@ -2,6 +2,7 @@ import Layout from "./Layout.jsx";
 import Home from "./Home";
 import Dashboard from "./Dashboard";
 import Builder from "./Builder";
+import Sandbox from "./Sandbox";
 import NotFound from "./NotFound.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
@@ -11,6 +12,7 @@ const PAGES = {
     Home: Home,
     Dashboard: Dashboard,
     Builder: Builder,
+    Sandbox: Sandbox,
 };
 
 const PAGE_NAMES = Object.keys(PAGES);
