@@ -8,7 +8,7 @@ import esbuild from "esbuild";
 import crypto from "crypto";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
-import { createClient as createLiveblocksClient } from "@liveblocks/node";
+import { Liveblocks } from "@liveblocks/node";
 import { MetadataServiceClient } from "./lib/db.js";
 import { StorageServiceClient } from "./lib/storage.js";
 import { WorkersAIClient } from "./lib/workersAi.js";
@@ -119,7 +119,7 @@ const sandboxManager = new SandboxManager({
 });
 
 const liveblocksSecretKey = process.env.LIVEBLOCKS_SECRET_KEY;
-const liveblocksClient = liveblocksSecretKey ? createLiveblocksClient({ secret: liveblocksSecretKey }) : null;
+const liveblocksClient = liveblocksSecretKey ? new Liveblocks({ secret: liveblocksSecretKey }) : null;
 
 if (!liveblocksSecretKey) {
   console.warn("Liveblocks secret key is not set. Collaborative rooms will not be available.");
