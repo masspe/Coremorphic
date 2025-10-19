@@ -54,6 +54,14 @@ export class Database {
       .all();
   }
 
+  getProject(projectId) {
+    return (
+      this.db
+        .prepare(`SELECT id, name, created_at FROM projects WHERE id = ?`)
+        .get(projectId) || null
+    );
+  }
+
   addMessage(projectId, role, content) {
     this.db
       .prepare(
