@@ -6,8 +6,11 @@ import { z } from "zod";
 import path from "path";
 import esbuild from "esbuild";
 import crypto from "crypto";
+import { createServer } from "http";
+import { Server as SocketIOServer } from "socket.io";
 import { Database } from "./lib/db.js";
 import { OpenAIClient } from "./lib/openai.js";
+import { SandboxManager } from "./sandbox/orchestrator.js";
 
 const app = express();
 app.use(cors());
@@ -16,6 +19,157 @@ app.use(bodyParser.json({ limit: "2mb" }));
 const port = process.env.PORT || 8787;
 const db = new Database(process.env.SQLITE_PATH || "./data.sqlite");
 const openai = new OpenAIClient({});
+
+const parseNumberEnv = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+const sandboxManager = new SandboxManager({
+  idleTimeoutMs: parseNumberEnv(process.env.SANDBOX_IDLE_TIMEOUT_MS),
+  defaultPreviewPort: parseNumberEnv(process.env.SANDBOX_PREVIEW_PORT)
+});
+
+const appServer = createServer(app);
+const io = new SocketIOServer(appServer, {
+  cors: {
+    origin: process.env.SANDBOX_SOCKET_ORIGIN || "*",
+    methods: ["GET", "POST"]
+  }
+});
+
+io.on("connection", (socket) => {
+  const handshake = socket.handshake ?? {};
+  const query = handshake.query ?? {};
+  const projectIdRaw = Array.isArray(query.projectId) ? query.projectId[0] : query.projectId;
+  const projectId = typeof projectIdRaw === "string" ? projectIdRaw : "";
+
+  if (!projectId) {
+    socket.emit("sandbox:error", { message: "projectId query parameter is required" });
+    socket.disconnect(true);
+    return;
+  }
+
+  let session;
+  let terminal;
+  let releaseConnection;
+  const acquiredPorts = new Map();
+
+  const releaseAllPorts = async () => {
+    await Promise.all(
+      Array.from(acquiredPorts.values()).map(async (handle) => {
+        try {
+          await handle.release?.();
+        } catch (error) {
+          console.warn("Failed to release port forward", error);
+        }
+      })
+    );
+    acquiredPorts.clear();
+  };
+
+  (async () => {
+    try {
+      session = await sandboxManager.ensureSession(projectId);
+      releaseConnection = session.acquireConnection();
+
+      const storedFiles = db.listFiles(projectId);
+      await session.syncProject(
+        storedFiles.map((file) => ({
+          path: file.path,
+          content: file.content ?? ""
+        }))
+      );
+
+      terminal = await session.createTerminal();
+      terminal.on("data", (data) => {
+        socket.emit("terminal:data", data);
+      });
+      terminal.on("exit", (payload) => {
+        socket.emit("terminal:exit", payload);
+      });
+      terminal.on("error", (error) => {
+        socket.emit("terminal:error", { message: error?.message || String(error) });
+      });
+
+      socket.emit("terminal:ready");
+    } catch (error) {
+      console.error("Failed to initialize sandbox session", error);
+      socket.emit("sandbox:error", { message: error?.message || String(error) });
+    }
+  })();
+
+  socket.on("terminal:input", (chunk) => {
+    try {
+      terminal?.write(chunk);
+      session?.touch();
+    } catch (error) {
+      console.error("Failed to write to sandbox terminal", error);
+      socket.emit("terminal:error", { message: error?.message || String(error) });
+    }
+  });
+
+  socket.on("terminal:resize", (size) => {
+    try {
+      terminal?.resize(size);
+    } catch (error) {
+      console.error("Failed to resize sandbox terminal", error);
+    }
+  });
+
+  socket.on("preview:open", async (payload) => {
+    if (!session) {
+      socket.emit("preview:error", { message: "Sandbox session is not ready" });
+      return;
+    }
+
+    try {
+      const portValue = payload?.port ?? payload?.remotePort;
+      const portNumber = Number(portValue);
+      if (!Number.isInteger(portNumber)) {
+        throw new Error("preview:open requires a valid numeric port");
+      }
+
+      const handle = await session.acquirePort(portNumber);
+      acquiredPorts.set(portNumber, handle);
+      socket.emit("preview:ready", {
+        remotePort: handle.remotePort,
+        localPort: handle.localPort,
+        url: handle.url
+      });
+    } catch (error) {
+      console.error("Failed to open preview port", error);
+      socket.emit("preview:error", { message: error?.message || String(error) });
+    }
+  });
+
+  socket.on("preview:close", async (payload) => {
+    const portValue = payload?.port ?? payload?.remotePort;
+    const portNumber = Number(portValue);
+    const handle = acquiredPorts.get(portNumber);
+    if (!handle) return;
+    acquiredPorts.delete(portNumber);
+    try {
+      await handle.release?.();
+      socket.emit("preview:closed", { remotePort: portNumber });
+    } catch (error) {
+      console.warn("Failed to close preview port", error);
+    }
+  });
+
+  socket.on("disconnect", async () => {
+    try {
+      await releaseAllPorts();
+    } finally {
+      terminal?.dispose();
+      terminal = null;
+      if (typeof releaseConnection === "function") {
+        releaseConnection();
+        releaseConnection = undefined;
+      }
+    }
+  });
+});
 
 const PREVIEW_ENTRY_CANDIDATES = [
   "src/main.tsx",
@@ -562,6 +716,19 @@ Output only valid JSON. No markdown fences.`;
   }
 });
 
-app.listen(port, () => {
-  console.log(`AI generator server listening on http://localhost:${port}`);
-});
+const startServer = () => {
+  appServer.listen(port, () => {
+    console.log(`AI generator server listening on http://localhost:${port}`);
+  });
+};
+
+const handleShutdownSignal = () => {
+  void sandboxManager.shutdown().catch((error) => {
+    console.error("Failed to shut down sandboxes", error);
+  });
+};
+
+process.on("SIGINT", handleShutdownSignal);
+process.on("SIGTERM", handleShutdownSignal);
+
+startServer();
