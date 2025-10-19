@@ -2,8 +2,8 @@ const DEFAULT_SANDBOX_STATUS = "idle";
 
 export const getSandboxStatus = (sandpack) => sandpack?.status ?? DEFAULT_SANDBOX_STATUS;
 
-export const canRunSandboxPreview = (status, runSandpack) =>
-  typeof runSandpack === "function" && status !== "running";
+export const canRunSandboxPreview = (_status, runSandpack) =>
+  typeof runSandpack === "function";
 
 export const runSandboxPreviewSafely = async (runSandpack) => {
   if (typeof runSandpack !== "function") {

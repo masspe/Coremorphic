@@ -18,10 +18,10 @@ test('getSandboxStatus returns the provided sandpack status when available', () 
   assert.equal(getSandboxStatus(sandpack), 'running');
 });
 
-test('canRunSandboxPreview requires a runnable function and a non-running status', () => {
+test('canRunSandboxPreview only requires a runnable function', () => {
   assert.equal(canRunSandboxPreview('idle', undefined), false);
   assert.equal(canRunSandboxPreview('idle', () => {}), true);
-  assert.equal(canRunSandboxPreview('running', () => {}), false);
+  assert.equal(canRunSandboxPreview('running', () => {}), true);
 });
 
 test('runSandboxPreviewSafely invokes the provided function', async () => {
