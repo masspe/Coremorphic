@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
+import { useUser } from "@clerk/clerk-react";
+import { createClient, LiveObject } from "@liveblocks/client";
+import {
+  LiveblocksProvider,
+  RoomProvider,
+  useMutation,
+  useOthers,
+  useSelf,
+  useStorage,
+  useUpdateMyPresence
+} from "@liveblocks/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -10,7 +21,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ExternalLink, Monitor, Play, RefreshCw, Server, Terminal } from "lucide-react";
+import { ExternalLink, Monitor, Play, RefreshCw, Server, Terminal, Users } from "lucide-react";
 
 const DEFAULT_PREVIEW_PORT = Number(import.meta.env.VITE_SANDBOX_PREVIEW_PORT ?? 4173);
 const MAX_TERMINAL_BUFFER = 60000;
@@ -31,6 +42,41 @@ const STATUS_CLASSES = {
   ready: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   disconnected: "bg-slate-200 text-slate-700 border border-slate-300",
   stopped: "bg-rose-100 text-rose-700 border border-rose-200"
+};
+
+const COLLABORATOR_COLORS = [
+  "#2563eb",
+  "#7c3aed",
+  "#db2777",
+  "#047857",
+  "#f97316",
+  "#0ea5e9",
+  "#9333ea",
+  "#dc2626",
+  "#0f766e",
+  "#facc15"
+];
+
+const getColorForUser = (userId) => {
+  if (!userId) return COLLABORATOR_COLORS[0];
+  let hash = 0;
+  for (let index = 0; index < userId.length; index += 1) {
+    hash = (hash << 5) - hash + userId.charCodeAt(index);
+    hash |= 0;
+  }
+  const normalized = Math.abs(hash) % COLLABORATOR_COLORS.length;
+  return COLLABORATOR_COLORS[normalized];
+};
+
+const resolveUserName = (user) => {
+  if (!user) return "Collaborator";
+  return (
+    user.fullName ||
+    user.username ||
+    user.primaryEmailAddress?.emailAddress ||
+    user.id ||
+    "Collaborator"
+  );
 };
 
 const createSocket = (projectId) =>
@@ -97,12 +143,32 @@ export default function Sandbox() {
   const [previewError, setPreviewError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
   const [previewPort, setPreviewPort] = useState(String(DEFAULT_PREVIEW_PORT));
+  const [previewPortNotice, setPreviewPortNotice] = useState("");
   const socketRef = useRef(null);
   const terminalRef = useRef(null);
+
+  const { isLoaded: isUserLoaded, user } = useUser();
+  const liveblocksClient = useMemo(
+    () => createClient({ authEndpoint: "/api/liveblocks/auth" }),
+    []
+  );
+  const currentUserId = user?.id ?? "anonymous";
+  const currentUserName = resolveUserName(user);
+  const currentUserColor = useMemo(() => getColorForUser(currentUserId), [currentUserId]);
 
   useEffect(() => {
     setPreviewPort(String(DEFAULT_PREVIEW_PORT));
   }, [projectId]);
+
+  useEffect(() => {
+    setPreviewPortNotice("");
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!previewPortNotice) return undefined;
+    const timeout = setTimeout(() => setPreviewPortNotice(""), 4000);
+    return () => clearTimeout(timeout);
+  }, [previewPortNotice]);
 
   useEffect(() => {
     if (!projectId) {
@@ -236,6 +302,22 @@ export default function Sandbox() {
     window.open(previewUrl, "_blank", "noopener,noreferrer");
   }, [previewUrl]);
 
+  const handlePreviewPortInput = useCallback((event) => {
+    const digits = event.target.value.replace(/[^0-9]/g, "");
+    setPreviewPortNotice("");
+    setPreviewPort(digits || "");
+  }, []);
+
+  const handleRemotePreviewPortUpdate = useCallback(
+    (metadata) => {
+      if (!metadata) return;
+      if (metadata.byId && metadata.byId === currentUserId) return;
+      const collaboratorName = metadata.byName || "another collaborator";
+      setPreviewPortNotice(`Preview port updated by ${collaboratorName}`);
+    },
+    [currentUserId]
+  );
+
   const activeProjectName = useMemo(() => {
     const project = projects.find((item) => item.id === projectId);
     return project?.name ?? "Select a project";
@@ -246,7 +328,15 @@ export default function Sandbox() {
 
   const aggregatedErrors = [projectsError, socketError, previewError].filter(Boolean);
 
-  return (
+  if (!isUserLoaded) {
+    return (
+      <div className="flex h-full items-center justify-center p-12 text-sm text-slate-600">
+        Checking your session…
+      </div>
+    );
+  }
+
+  const content = (
     <div className="space-y-8">
       <section className="rounded-3xl border border-white/40 bg-white/60 px-8 py-10 shadow-2xl backdrop-blur">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -286,6 +376,7 @@ export default function Sandbox() {
             </Button>
           </div>
         </div>
+        {projectId ? <CollaboratorsBar /> : null}
         {!projects.length && !loading ? (
           <p className="mt-6 text-sm text-slate-600">
             No projects found. Create a project from the builder to launch a sandbox session.
@@ -352,21 +443,23 @@ export default function Sandbox() {
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <Monitor className="h-4 w-4" /> Sandbox preview
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-500">
-                Forwarded port
-                <Input
-                  value={previewPort}
-                  onChange={(event) => {
-                    const digits = event.target.value.replace(/[^0-9]/g, "");
-                    setPreviewPort(digits || "");
-                  }}
-                  className="h-8 w-20 border-slate-200 text-xs"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                />
-                <Button type="button" size="sm" variant="outline" className="border-slate-200" onClick={handlePreviewReconnect}>
-                  <Server className="mr-2 h-4 w-4" /> Reconnect
-                </Button>
+              <div className="flex flex-col items-end gap-1 text-xs text-slate-500">
+                <div className="flex items-center gap-2">
+                  Forwarded port
+                  <Input
+                    value={previewPort}
+                    onChange={handlePreviewPortInput}
+                    className="h-8 w-20 border-slate-200 text-xs"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                  />
+                  <Button type="button" size="sm" variant="outline" className="border-slate-200" onClick={handlePreviewReconnect}>
+                    <Server className="mr-2 h-4 w-4" /> Reconnect
+                  </Button>
+                </div>
+                {previewPortNotice ? (
+                  <span className="text-[11px] text-slate-400">{previewPortNotice}</span>
+                ) : null}
               </div>
             </div>
             <div className="relative aspect-video overflow-hidden rounded-b-3xl border-t border-white/60">
@@ -412,4 +505,244 @@ export default function Sandbox() {
       </div>
     </div>
   );
+
+  return (
+    <LiveblocksProvider client={liveblocksClient}>
+      {projectId ? (
+        <RoomProvider
+          id={`project-${projectId}`}
+          initialPresence={{ cursor: null, name: currentUserName, color: currentUserColor, previewPort, terminalStatus }}
+          initialStorage={{
+            sandbox: new LiveObject({
+              previewPort: String(DEFAULT_PREVIEW_PORT),
+              previewPortUpdatedById: null,
+              previewPortUpdatedByName: null,
+              previewPortUpdatedAt: Date.now()
+            })
+          }}
+        >
+          <PresenceManager
+            userName={currentUserName}
+            color={currentUserColor}
+            previewPort={previewPort}
+            terminalStatus={terminalStatus}
+          />
+          <PreviewPortSynchronizer
+            defaultPort={DEFAULT_PREVIEW_PORT}
+            previewPort={previewPort}
+            onLocalSync={(value) => setPreviewPort(String(value ?? ""))}
+            onRemoteUpdate={handleRemotePreviewPortUpdate}
+            currentUserId={currentUserId}
+            currentUserName={currentUserName}
+          />
+          <div className="relative">
+            <CollaboratorCursors />
+            {content}
+          </div>
+        </RoomProvider>
+      ) : (
+        content
+      )}
+    </LiveblocksProvider>
+  );
+}
+
+function CollaboratorsBar() {
+  const self = useSelf();
+  const others = useOthers();
+
+  const participants = [];
+  if (self) participants.push({ ...self, isSelf: true });
+  others.forEach((participant) => participants.push({ ...participant, isSelf: false }));
+
+  if (!participants.length) {
+    return (
+      <div className="mt-6 flex items-center gap-2 rounded-2xl border border-dashed border-white/70 bg-white/60 px-4 py-2 text-xs text-slate-500">
+        <Users className="h-4 w-4" /> Waiting for collaborators to join…
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-white/70 bg-white/80 p-3 text-xs text-slate-600">
+      <span className="inline-flex items-center gap-2 font-semibold text-slate-700">
+        <Users className="h-4 w-4" /> Live collaborators
+      </span>
+      {participants.map((participant) => {
+        const presence = participant.presence ?? {};
+        const name = participant.isSelf ? "You" : presence.name || "Collaborator";
+        const color = presence.color || "#6366f1";
+        const initials = (name || "?")
+          .split(" ")
+          .map((part) => part[0])
+          .filter(Boolean)
+          .slice(0, 2)
+          .join("")
+          .toUpperCase() || "U";
+        const status = presence.terminalStatus ? STATUS_LABELS[presence.terminalStatus] ?? presence.terminalStatus : null;
+        const previewInfo = presence.previewPort ? `Port ${presence.previewPort}` : null;
+        return (
+          <span
+            key={participant.connectionId}
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 shadow-sm"
+          >
+            <span
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold text-white"
+              style={{ backgroundColor: color }}
+            >
+              {initials}
+            </span>
+            <span className="text-slate-600">{name}</span>
+            <span className="flex gap-2 text-[10px] uppercase tracking-wide text-slate-400">
+              {status ? <span>{status}</span> : null}
+              {previewInfo ? <span>{previewInfo}</span> : null}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function CollaboratorCursors() {
+  const others = useOthers();
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-30">
+      {others.map(({ connectionId, presence }) => {
+        const cursor = presence?.cursor;
+        if (!cursor) return null;
+        const color = presence?.color || "#6366f1";
+        return (
+          <div
+            key={connectionId}
+            className="absolute -translate-x-1/2 -translate-y-1/2"
+            style={{ transform: `translate(${cursor.x}px, ${cursor.y}px)` }}
+          >
+            <div className="flex items-center gap-2">
+              <span className="block h-3 w-3 rounded-full" style={{ backgroundColor: color }} />
+              <span className="rounded bg-white/90 px-2 py-1 text-[10px] font-medium text-slate-700 shadow">
+                {presence?.name || "Collaborator"}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function PresenceManager({ userName, color, previewPort, terminalStatus }) {
+  const updateMyPresence = useUpdateMyPresence();
+
+  useEffect(() => {
+    updateMyPresence({ name: userName, color, cursor: null });
+  }, [userName, color, updateMyPresence]);
+
+  useEffect(() => {
+    updateMyPresence({ previewPort });
+  }, [previewPort, updateMyPresence]);
+
+  useEffect(() => {
+    updateMyPresence({ terminalStatus });
+  }, [terminalStatus, updateMyPresence]);
+
+  useEffect(() => {
+    let animationFrame = null;
+    const handlePointerMove = (event) => {
+      const { clientX, clientY } = event;
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(() => {
+        updateMyPresence({ cursor: { x: clientX, y: clientY } });
+      });
+    };
+    const handlePointerLeave = () => updateMyPresence({ cursor: null });
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerleave", handlePointerLeave);
+
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerleave", handlePointerLeave);
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+      updateMyPresence({ cursor: null });
+    };
+  }, [updateMyPresence]);
+
+  return null;
+}
+
+function PreviewPortSynchronizer({
+  defaultPort,
+  previewPort,
+  onLocalSync,
+  onRemoteUpdate,
+  currentUserId,
+  currentUserName
+}) {
+  const sharedState = useStorage((root) => {
+    const sandbox = root.get("sandbox");
+    if (!sandbox) {
+      return {
+        previewPort: String(defaultPort),
+        updatedById: null,
+        updatedByName: null,
+        updatedAt: null
+      };
+    }
+    return {
+      previewPort: sandbox.get("previewPort") ?? String(defaultPort),
+      updatedById: sandbox.get("previewPortUpdatedById") ?? null,
+      updatedByName: sandbox.get("previewPortUpdatedByName") ?? null,
+      updatedAt: sandbox.get("previewPortUpdatedAt") ?? null
+    };
+  });
+
+  const updateSandbox = useMutation(
+    ({ storage }, value, actor) => {
+      let sandbox = storage.get("sandbox");
+      if (!sandbox) {
+        sandbox = new LiveObject({
+          previewPort: value,
+          previewPortUpdatedById: actor?.userId ?? null,
+          previewPortUpdatedByName: actor?.name ?? null,
+          previewPortUpdatedAt: Date.now()
+        });
+        storage.set("sandbox", sandbox);
+        return;
+      }
+      sandbox.set("previewPort", value);
+      sandbox.set("previewPortUpdatedById", actor?.userId ?? null);
+      sandbox.set("previewPortUpdatedByName", actor?.name ?? null);
+      sandbox.set("previewPortUpdatedAt", Date.now());
+    },
+    [defaultPort]
+  );
+
+  const lastSyncedRef = useRef(null);
+
+  useEffect(() => {
+    if (!sharedState) return;
+    const remoteValue = sharedState.previewPort ?? String(defaultPort);
+    if (remoteValue !== previewPort) {
+      lastSyncedRef.current = remoteValue;
+      onLocalSync?.(remoteValue);
+      onRemoteUpdate?.({
+        byId: sharedState.updatedById,
+        byName: sharedState.updatedByName,
+        updatedAt: sharedState.updatedAt
+      });
+    } else {
+      lastSyncedRef.current = remoteValue;
+    }
+  }, [sharedState, previewPort, onLocalSync, onRemoteUpdate, defaultPort]);
+
+  useEffect(() => {
+    if (previewPort == null) return;
+    if (lastSyncedRef.current === previewPort) return;
+    lastSyncedRef.current = previewPort;
+    updateSandbox(String(previewPort), { userId: currentUserId, name: currentUserName });
+  }, [previewPort, updateSandbox, currentUserId, currentUserName]);
+
+  return null;
 }
