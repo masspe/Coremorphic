@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   SandpackProvider,
   SandpackLayout,
@@ -12,6 +12,11 @@ import { Play, RefreshCw, Terminal, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import {
+  getSandboxStatus,
+  canRunSandboxPreview,
+  runSandboxPreviewSafely
+} from "./sandboxControlsLogic";
 import PropTypes from "prop-types";
 
 const createPackageJson = (dependencies, devDependencies = {}) =>
@@ -443,7 +448,15 @@ const createFileMap = (files, activeFile) => {
 
 function SandboxControls({ onReset }) {
   const { sandpack } = useSandpack();
-  const status = sandpack.status ?? "idle";
+  const status = getSandboxStatus(sandpack);
+  const runSandpack = sandpack?.runSandpack;
+  const canRunPreview = canRunSandboxPreview(status, runSandpack);
+
+  const handleRunPreview = useCallback(() => {
+    if (runSandpack) {
+      void runSandboxPreviewSafely(runSandpack);
+    }
+  }, [runSandpack]);
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-sm backdrop-blur-sm md:flex-row md:items-center md:justify-between">
@@ -471,8 +484,8 @@ function SandboxControls({ onReset }) {
         <Button
           type="button"
           className="bg-purple-600 hover:bg-purple-700"
-          onClick={() => sandpack.runSandpack()}
-          disabled={sandpack.status === "running"}
+          onClick={handleRunPreview}
+          disabled={!canRunPreview}
         >
           <Play className="mr-2 h-4 w-4" /> Run preview
         </Button>
