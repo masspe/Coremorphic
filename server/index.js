@@ -10,7 +10,8 @@ import crypto from "crypto";
 import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { createClient as createLiveblocksClient } from "@liveblocks/node";
-import { Database } from "./lib/db.js";
+import { MetadataServiceClient } from "./lib/db.js";
+import { StorageServiceClient } from "./lib/storage.js";
 import { OpenAIClient } from "./lib/openai.js";
 import { SandboxManager } from "./sandbox/orchestrator.js";
 
@@ -43,7 +44,25 @@ app.use(cors());
 app.use(bodyParser.json({ limit: "2mb" }));
 
 const port = process.env.PORT || 8787;
-const db = new Database(process.env.SQLITE_PATH || "./data.sqlite");
+const serviceToken =
+  process.env.SERVICE_AUTH_TOKEN || process.env.CLOUDFLARE_SERVICE_TOKEN || "";
+
+const metadataBinding =
+  typeof METADATA_SERVICE !== "undefined" ? METADATA_SERVICE : undefined;
+const storageBinding =
+  typeof STORAGE_SERVICE !== "undefined" ? STORAGE_SERVICE : undefined;
+
+const metadata = new MetadataServiceClient({
+  serviceBinding: metadataBinding,
+  baseUrl: process.env.METADATA_SERVICE_URL,
+  token: serviceToken || undefined
+});
+
+const storage = new StorageServiceClient({
+  serviceBinding: storageBinding,
+  baseUrl: process.env.STORAGE_SERVICE_URL,
+  token: serviceToken || undefined
+});
 const openai = new OpenAIClient({});
 
 const parseNumberEnv = (value) => {
@@ -106,7 +125,7 @@ io.on("connection", (socket) => {
       session = await sandboxManager.ensureSession(projectId);
       releaseConnection = session.acquireConnection();
 
-      const storedFiles = db.listFiles(projectId);
+      const storedFiles = await storage.listProjectFiles(projectId);
       await session.syncProject(
         storedFiles.map((file) => ({
           path: file.path,
@@ -245,7 +264,7 @@ const ensureEntryPoint = (fileMap) => {
 };
 
 const compileProject = async (projectId) => {
-  const storedFiles = db.listFiles(projectId);
+  const storedFiles = await storage.listProjectFiles(projectId);
   if (!storedFiles.length) {
     return { ok: false, message: "Project has no files to compile.", errors: [] };
   }
@@ -390,7 +409,7 @@ const createVirtualPlugin = (fileMap) => ({
 });
 
 const buildPreviewHtml = async (projectId) => {
-  const storedFiles = db.listFiles(projectId);
+  const storedFiles = await storage.listProjectFiles(projectId);
   if (!storedFiles.length) {
     throw new Error("Project has no files to preview");
   }
@@ -501,15 +520,25 @@ const AutoFixSchema = z.object({
 
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
-app.get("/api/projects", (_req, res) => {
-  const rows = db.listProjects();
-  res.json(rows);
+app.get("/api/projects", async (_req, res) => {
+  try {
+    const rows = await metadata.listProjects();
+    res.json(rows);
+  } catch (error) {
+    console.error("Failed to list projects", error);
+    res.status(500).json({ error: "Failed to list projects" });
+  }
 });
 
-app.post("/api/projects", (req, res) => {
-  const { name } = req.body ?? {};
-  const project = db.createProject(name || "New Project");
-  res.json(project);
+app.post("/api/projects", async (req, res) => {
+  try {
+    const { name } = req.body ?? {};
+    const project = await metadata.createProject(name || "New Project");
+    res.json(project);
+  } catch (error) {
+    console.error("Failed to create project", error);
+    res.status(500).json({ error: "Failed to create project" });
+  }
 });
 
 app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
@@ -536,7 +565,7 @@ app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
     return;
   }
 
-  const project = db.getProject(projectId);
+  const project = await metadata.getProject(projectId);
   if (!project) {
     res.status(404).json({ error: "Project not found" });
     return;
@@ -584,35 +613,63 @@ app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
   }
 });
 
-app.get("/api/memory/:projectId", (req, res) => {
-  res.json(db.getMemory(req.params.projectId));
+app.get("/api/memory/:projectId", async (req, res) => {
+  try {
+    const memory = await metadata.getMemory(req.params.projectId);
+    res.json(memory);
+  } catch (error) {
+    console.error("Failed to load project memory", error);
+    res.status(500).json({ error: "Failed to load project memory" });
+  }
 });
 
-app.post("/api/memory/:projectId", (req, res) => {
-  const { content } = req.body ?? {};
-  db.setMemory(req.params.projectId, content || "");
-  res.json({ ok: true });
+app.post("/api/memory/:projectId", async (req, res) => {
+  try {
+    const { content } = req.body ?? {};
+    await metadata.setMemory(req.params.projectId, content || "");
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to update project memory", error);
+    res.status(500).json({ error: "Failed to update project memory" });
+  }
 });
 
-app.get("/api/projects/:projectId/files", (req, res) => {
-  res.json(db.listFiles(req.params.projectId));
+app.get("/api/projects/:projectId/files", async (req, res) => {
+  try {
+    const files = await storage.listProjectFiles(req.params.projectId);
+    res.json(files);
+  } catch (error) {
+    console.error("Failed to list project files", error);
+    res.status(500).json({ error: "Failed to list project files" });
+  }
 });
 
-app.post("/api/projects/:projectId/files", (req, res) => {
+app.post("/api/projects/:projectId/files", async (req, res) => {
   const { path, content } = req.body ?? {};
   if (!path) return res.status(400).json({ error: "path required" });
-  db.upsertFile(req.params.projectId, path, String(content ?? ""));
-  res.json({ ok: true });
+  try {
+    await storage.upsertFile(req.params.projectId, path, String(content ?? ""));
+    res.json({ ok: true });
+  } catch (error) {
+    console.error("Failed to upsert project file", error);
+    res.status(500).json({ error: "Failed to save file" });
+  }
 });
 
-app.post("/api/projects/:projectId/search", (req, res) => {
+app.post("/api/projects/:projectId/search", async (req, res) => {
   const parsed = SearchSchema.safeParse(req.body ?? {});
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
   const { query, limit = 20, caseSensitive = false } = parsed.data;
-  const files = db.listFiles(req.params.projectId);
+  let files = [];
+  try {
+    files = await storage.listProjectFiles(req.params.projectId);
+  } catch (error) {
+    console.error("Failed to search project files", error);
+    return res.status(500).json({ error: "Failed to search project files" });
+  }
   const normalizedQuery = caseSensitive ? query : query.toLowerCase();
   const results = [];
 
@@ -663,8 +720,9 @@ app.post("/api/projects/:projectId/autofix", async (req, res) => {
 
   const { errors, prompt, model } = parsed.data;
   const projectId = req.params.projectId;
-  const projectFiles = db.listFiles(projectId);
-  const memory = db.getMemory(projectId)?.content || "";
+  const projectFiles = await storage.listProjectFiles(projectId);
+  const memoryRecord = await metadata.getMemory(projectId);
+  const memory = memoryRecord?.content || "";
 
   const memorySection = memory && memory.trim() ? memory : "(empty)";
   const fileSummary = summariseProjectFiles(projectFiles);
@@ -737,12 +795,14 @@ Rules:
       throw new Error("Model returned invalid JSON shape.");
     }
 
-    db.addMessage(projectId, "developer", `Autofix errors provided to model:\n${errorSummary}`);
-    db.addMessage(projectId, "assistant", JSON.stringify(json));
+    await metadata.addMessage(projectId, "developer", `Autofix errors provided to model:\n${errorSummary}`);
+    await metadata.addMessage(projectId, "assistant", JSON.stringify(json));
 
-    Object.entries(json.files).forEach(([filePath, fileContent]) => {
-      db.upsertFile(projectId, filePath, String(fileContent));
-    });
+    await Promise.all(
+      Object.entries(json.files).map(([filePath, fileContent]) =>
+        storage.upsertFile(projectId, filePath, String(fileContent))
+      )
+    );
 
     res.json({ ok: true, result: json });
   } catch (error) {
@@ -768,7 +828,8 @@ app.post("/api/generate", async (req, res) => {
 
   const { projectId, prompt, instructions, model } = parsed.data;
 
-  const memory = db.getMemory(projectId)?.content || "";
+  const memoryRecord = await metadata.getMemory(projectId);
+  const memory = memoryRecord?.content || "";
 
   const systemMessage = `You are a senior full-stack engineer. Given a user prompt, output a JSON object with this exact shape:
 {
@@ -784,7 +845,7 @@ Rules:
 - If the user wants UI libs, include install hints in notes.
 Output only valid JSON. No markdown fences.`;
 
-  const projectFiles = db.listFiles(projectId);
+  const projectFiles = await storage.listProjectFiles(projectId);
   const fileSummary = summariseProjectFiles(projectFiles);
 
   const memorySection = memory && memory.trim() ? memory : "(empty)";
@@ -805,14 +866,16 @@ Output only valid JSON. No markdown fences.`;
       throw new Error("Model returned invalid JSON shape.");
     }
 
-    db.addMessage(projectId, "system", systemMessage);
-    db.addMessage(projectId, "developer", developerMessage);
-    db.addMessage(projectId, "user", userMessage);
-    db.addMessage(projectId, "assistant", JSON.stringify(json));
+    await metadata.addMessage(projectId, "system", systemMessage);
+    await metadata.addMessage(projectId, "developer", developerMessage);
+    await metadata.addMessage(projectId, "user", userMessage);
+    await metadata.addMessage(projectId, "assistant", JSON.stringify(json));
 
-    Object.entries(json.files).forEach(([filePath, fileContent]) => {
-      db.upsertFile(projectId, filePath, String(fileContent));
-    });
+    await Promise.all(
+      Object.entries(json.files).map(([filePath, fileContent]) =>
+        storage.upsertFile(projectId, filePath, String(fileContent))
+      )
+    );
 
     res.json({ ok: true, result: json });
   } catch (error) {
@@ -821,7 +884,19 @@ Output only valid JSON. No markdown fences.`;
   }
 });
 
-const startServer = () => {
+const startServer = async () => {
+  try {
+    await metadata.bootstrap();
+  } catch (error) {
+    console.warn("Failed to bootstrap metadata service", error);
+  }
+
+  try {
+    await storage.bootstrap();
+  } catch (error) {
+    console.warn("Failed to bootstrap storage service", error);
+  }
+
   appServer.listen(port, () => {
     console.log(`AI generator server listening on http://localhost:${port}`);
   });
@@ -836,4 +911,4 @@ const handleShutdownSignal = () => {
 process.on("SIGINT", handleShutdownSignal);
 process.on("SIGTERM", handleShutdownSignal);
 
-startServer();
+void startServer();
