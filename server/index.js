@@ -8,6 +8,7 @@ import esbuild from "esbuild";
 import crypto from "crypto";
 import { Database } from "./lib/db.js";
 import { OpenAIClient } from "./lib/openai.js";
+import JSZip from "jszip";
 
 const app = express();
 app.use(cors());
@@ -26,6 +27,20 @@ const PREVIEW_ENTRY_CANDIDATES = [
 ];
 
 const normaliseStoredPath = (value) => value.replace(/^\.\//, "").replace(/^\//, "");
+
+const sanitizeFilename = (value, fallback = "project") => {
+  if (!value) return fallback;
+  const trimmed = String(value).trim();
+  if (!trimmed) return fallback;
+
+  const normalized = trimmed
+    .replace(/[^a-z0-9-_]+/gi, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 64);
+
+  return normalized || fallback;
+};
 
 const createVirtualPlugin = (fileMap) => ({
   name: "virtual-project-files",
@@ -233,6 +248,46 @@ app.post("/api/memory/:projectId", (req, res) => {
 
 app.get("/api/projects/:projectId/files", (req, res) => {
   res.json(db.listFiles(req.params.projectId));
+});
+
+app.get("/api/projects/:projectId/export", async (req, res) => {
+  try {
+    const project = db.getProject(req.params.projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const files = db.listFiles(project.id);
+    if (!files.length) {
+      return res.status(400).json({ error: "Project has no files to export" });
+    }
+
+    const zip = new JSZip();
+    files.forEach((file) => {
+      const normalizedPath = normaliseStoredPath(file.path);
+      zip.file(normalizedPath, file.content ?? "");
+    });
+
+    const buffer = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+      compressionOptions: { level: 9 }
+    });
+
+    const baseName = sanitizeFilename(project.name || project.id, "project");
+    const filename = `${baseName}-source.zip`;
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+    );
+    res.setHeader("Content-Length", buffer.length);
+    res.send(buffer);
+  } catch (error) {
+    console.error("Failed to export project", error);
+    res.status(500).json({ error: error.message || "Failed to export project" });
+  }
 });
 
 app.post("/api/projects/:projectId/files", (req, res) => {

@@ -40,7 +40,48 @@ const memory = {
 const files = {
   list: (projectId) => request(`/projects/${projectId}/files`),
   save: (projectId, path, content) =>
-    request(`/projects/${projectId}/files`, { method: "POST", body: { path, content } })
+    request(`/projects/${projectId}/files`, { method: "POST", body: { path, content } }),
+  exportZip: async (projectId) => {
+    const url = buildUrl(`/projects/${projectId}/export`);
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      let message = `Export request to ${url} failed with status ${response.status}`;
+      try {
+        const data = await response.json();
+        if (data?.error) {
+          message = data.error;
+        }
+      } catch (jsonError) {
+        try {
+          const text = await response.text();
+          if (text) message = text;
+        } catch (textError) {
+          console.warn("Failed to parse export error response", jsonError, textError);
+        }
+      }
+      throw new Error(message);
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    let filename = `project-${projectId}.zip`;
+
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+    if (match) {
+      const encoded = match[1] || match[2];
+      if (encoded) {
+        try {
+          filename = decodeURIComponent(encoded);
+        } catch (error) {
+          console.warn("Failed to decode export filename", error);
+          filename = encoded;
+        }
+      }
+    }
+
+    return { blob, filename };
+  }
 };
 
 const generate = (payload) => request("/generate", { method: "POST", body: payload });

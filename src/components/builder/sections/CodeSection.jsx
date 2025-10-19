@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { Loader2, Save, RefreshCw, FileCode, Search } from "lucide-react";
+import { Loader2, Save, RefreshCw, FileCode, Search, Download } from "lucide-react";
 import { backend } from "@/api/backendClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,7 @@ export default function CodeSection({ projectId }) {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
@@ -83,6 +84,28 @@ export default function CodeSection({ projectId }) {
       setStatus({ type: "error", message: error.message || "Failed to save file" });
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!projectId) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await backend.files.exportZip(projectId);
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      window.URL.revokeObjectURL(url);
+      setStatus({ type: "success", message: "Exported project as ZIP" });
+    } catch (error) {
+      console.error("Failed to export project", error);
+      setStatus({ type: "error", message: error.message || "Failed to export project" });
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -178,6 +201,20 @@ export default function CodeSection({ projectId }) {
               disabled={loading}
             >
               <RefreshCw className="w-4 h-4 mr-1" /> Refresh
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="bg-white/80 border-white/50"
+              onClick={handleExport}
+              disabled={exporting || loading || files.length === 0}
+            >
+              {exporting ? (
+                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4 mr-1" />
+              )}
+              Export
             </Button>
             <Button
               size="sm"
