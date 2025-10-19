@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   SandpackProvider,
   SandpackLayout,
@@ -6,9 +6,18 @@ import {
   SandpackCodeEditor,
   SandpackFileExplorer,
   SandpackConsole,
-  useSandpack
+  useSandpack,
+  useSandpackShell,
+  useSandpackShellStdout
 } from "@codesandbox/sandpack-react";
-import { Play, RefreshCw, Terminal, Monitor } from "lucide-react";
+import {
+  ExternalLink,
+  Monitor,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Terminal
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -60,6 +69,7 @@ const REACT_JS_PRESET = {
   template: "vite-react",
   entry: "/src/main.jsx",
   activeFile: "/src/App.jsx",
+  environment: "node",
   dependencies: {
     react: "18.2.0",
     "react-dom": "18.2.0"
@@ -213,6 +223,7 @@ const REACT_TS_PRESET = {
   template: "vite-react-ts",
   entry: "/src/main.tsx",
   activeFile: "/src/App.tsx",
+  environment: "node",
   dependencies: {
     react: "18.2.0",
     "react-dom": "18.2.0"
@@ -424,14 +435,27 @@ const SANDBOX_STATUS_LABELS = {
   idle: "Ready",
   running: "Compiling",
   success: "Running",
-  error: "Error"
+  error: "Error",
+  initial: "Starting",
+  done: "Running",
+  timeout: "Timeout"
 };
 
 const SANDBOX_STATUS_STYLES = {
   idle: "bg-emerald-100 text-emerald-700 border border-emerald-200",
   running: "bg-amber-100 text-amber-700 border border-amber-200",
   success: "bg-sky-100 text-sky-700 border border-sky-200",
-  error: "bg-rose-100 text-rose-700 border border-rose-200"
+  error: "bg-rose-100 text-rose-700 border border-rose-200",
+  initial: "bg-amber-100 text-amber-700 border border-amber-200",
+  done: "bg-sky-100 text-sky-700 border border-sky-200",
+  timeout: "bg-rose-100 text-rose-700 border border-rose-200"
+};
+
+const TERMINAL_PROGRESS_MESSAGES = {
+  downloading_manifest: "Downloading dependencies…",
+  downloaded_module: "Installing dependencies…",
+  starting_command: "Starting dev server…",
+  command_running: "Running dev server"
 };
 
 const createFileMap = (files, activeFile) => {
@@ -451,12 +475,19 @@ function SandboxControls({ onReset }) {
   const status = getSandboxStatus(sandpack);
   const runSandpack = sandpack?.runSandpack;
   const canRunPreview = canRunSandboxPreview(status, runSandpack);
+  const { openPreview } = useSandpackShell();
 
   const handleRunPreview = useCallback(() => {
     if (runSandpack) {
       void runSandboxPreviewSafely(runSandpack);
     }
   }, [runSandpack]);
+
+  const handleOpenPreview = useCallback(() => {
+    if (typeof openPreview === "function") {
+      openPreview();
+    }
+  }, [openPreview]);
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-sm backdrop-blur-sm md:flex-row md:items-center md:justify-between">
@@ -489,6 +520,14 @@ function SandboxControls({ onReset }) {
         >
           <Play className="mr-2 h-4 w-4" /> Run preview
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="bg-white/90"
+          onClick={handleOpenPreview}
+        >
+          <ExternalLink className="mr-2 h-4 w-4" /> Open preview window
+        </Button>
       </div>
     </div>
   );
@@ -497,6 +536,173 @@ function SandboxControls({ onReset }) {
 SandboxControls.propTypes = {
   onReset: PropTypes.func.isRequired
 };
+
+function SandboxTerminal() {
+  const { sandpack, listen } = useSandpack();
+  const { restart, openPreview } = useSandpackShell();
+  const { logs, reset } = useSandpackShellStdout({
+    resetOnPreviewRestart: true
+  });
+  const status = getSandboxStatus(sandpack);
+  const statusLabel =
+    SANDBOX_STATUS_LABELS[status] || SANDBOX_STATUS_LABELS.idle;
+  const statusClassName =
+    SANDBOX_STATUS_STYLES[status] || SANDBOX_STATUS_STYLES.idle;
+
+  const [progress, setProgress] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const outputRef = useRef(null);
+
+  useEffect(() => {
+    const unsubscribe = listen((message) => {
+      if (message.type === "shell/progress") {
+        const nextState = {
+          state: message.data?.state ?? null,
+          command: message.data?.command?.trim() || null
+        };
+        setProgress(nextState);
+      } else if (message.type === "done") {
+        setProgress((current) =>
+          current ? { ...current, state: "done" } : { state: "done" }
+        );
+      } else if (message.type === "urlchange" && typeof message.url === "string") {
+        setPreviewUrl(message.url);
+      }
+    });
+
+    return () => {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+    };
+  }, [listen]);
+
+  useEffect(() => {
+    if (outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  const command = progress?.command || "npm run dev";
+  const hasLogs = logs.length > 0;
+  const logText = logs.map((entry) => entry.data).join("");
+
+  const progressLabel = useMemo(() => {
+    if (status === "error" || status === "timeout") {
+      return "Dev server encountered an error";
+    }
+
+    if (status === "success" || status === "done" || status === "idle") {
+      return "Dev server ready";
+    }
+
+    if (progress?.state) {
+      if (progress.state === "command_running") {
+        return progress.command
+          ? `Running "${progress.command}"`
+          : TERMINAL_PROGRESS_MESSAGES.command_running;
+      }
+
+      return (
+        TERMINAL_PROGRESS_MESSAGES[progress.state] ||
+        "Preparing workspace…"
+      );
+    }
+
+    return "Preparing workspace…";
+  }, [progress, status]);
+
+  const handleRestart = useCallback(() => {
+    if (typeof restart === "function") {
+      restart();
+    }
+    reset();
+  }, [restart, reset]);
+
+  const handleOpenPreview = useCallback(() => {
+    if (previewUrl) {
+      window.open(previewUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    if (typeof openPreview === "function") {
+      openPreview();
+    }
+  }, [openPreview, previewUrl]);
+
+  const handleClear = useCallback(() => {
+    reset();
+  }, [reset]);
+
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-950/95 text-slate-100 shadow-xl">
+      <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap items-center gap-3 text-sm font-medium">
+          <span className="inline-flex items-center gap-2">
+            <Terminal className="h-4 w-4" /> Dev server terminal
+          </span>
+          <span
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
+              statusClassName
+            )}
+          >
+            {statusLabel}
+          </span>
+        </div>
+        <span className="text-xs text-slate-400">{progressLabel}</span>
+      </div>
+      <div
+        ref={outputRef}
+        className="max-h-64 overflow-auto px-4 py-4 font-mono text-xs leading-relaxed"
+        data-testid="sandbox-terminal-output"
+      >
+        <pre className="whitespace-pre-wrap">
+          <span className="text-emerald-300">{`> ${command}`}</span>
+          {"\n"}
+          <span className="text-slate-100">
+            {hasLogs ? logText : "Waiting for dev server output…"}
+          </span>
+        </pre>
+      </div>
+      <div className="flex flex-col gap-3 border-t border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-xs text-slate-400">
+          Output from the sandboxed Vite development server.
+        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-slate-700 bg-slate-900/50 text-slate-100 hover:bg-slate-900"
+            onClick={handleRestart}
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> Restart dev server
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="border-slate-700 bg-slate-900/50 text-slate-100 hover:bg-slate-900"
+            onClick={handleOpenPreview}
+            disabled={!previewUrl && status !== "done" && status !== "success" && status !== "idle"}
+          >
+            <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-slate-300 hover:bg-slate-900"
+            onClick={handleClear}
+          >
+            Clear output
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Sandbox() {
   const [presetKey, setPresetKey] = useState("react-js");
@@ -517,6 +723,16 @@ export default function Sandbox() {
 
   const visibleFiles = useMemo(
     () => Object.keys(preset.files),
+    [preset]
+  );
+
+  const sandpackSetup = useMemo(
+    () => ({
+      dependencies: preset.dependencies,
+      devDependencies: preset.devDependencies,
+      entry: preset.entry,
+      environment: preset.environment ?? "node"
+    }),
     [preset]
   );
 
@@ -590,11 +806,7 @@ export default function Sandbox() {
           key={`${presetKey}-${sessionKey}`}
           template={preset.template}
           files={sandpackFiles}
-          customSetup={{
-            dependencies: preset.dependencies,
-            devDependencies: preset.devDependencies,
-            entry: preset.entry
-          }}
+          customSetup={sandpackSetup}
           options={{
             autorun: true,
             initMode: "immediate",
@@ -626,6 +838,8 @@ export default function Sandbox() {
                 showRunButton
               />
             </SandpackLayout>
+
+            <SandboxTerminal />
 
             <div className="rounded-2xl border border-white/60 bg-slate-950/90 text-slate-100 shadow-xl">
               <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-medium">
