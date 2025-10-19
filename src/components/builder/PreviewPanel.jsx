@@ -18,48 +18,17 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { backend } from "@/api/backendClient";
 import { cn } from "@/lib/utils";
+import {
+  buildSandpackConfig,
+  buildSandpackFiles,
+  normalizeSandpackPath
+} from "./previewSandpackUtils";
 
 const deviceSizes = {
   desktop: "w-full h-full",
   tablet: "w-[768px] h-[1024px] mx-auto",
   mobile: "w-[375px] h-[667px] mx-auto"
 };
-
-const normalizeSandpackPath = (path = "") => {
-  if (!path) return "/";
-  const normalized = path.replace(/^\.?\//, "").replace(/\\/g, "/");
-  return normalized.startsWith("/") ? normalized : `/${normalized}`;
-};
-
-const PREVIEW_ENTRY_CANDIDATES = [
-  "/src/main.tsx",
-  "/src/main.jsx",
-  "/src/main.js",
-  "/src/App.tsx",
-  "/src/App.jsx"
-];
-
-const DEFAULT_VITE_CONFIG_JS = `import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-});
-`;
-
-const DEFAULT_VITE_CONFIG_TS = `import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-
-export default defineConfig({
-  plugins: [react()],
-});
-`;
-
-const OPTIONAL_PREVIEW_DEV_DEPENDENCIES = [
-  "tailwindcss",
-  "postcss",
-  "autoprefixer"
-];
 
 const SandpackErrorBridge = ({ onErrorChange }) => {
   const errorMessage = useErrorMessage();
@@ -145,214 +114,15 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
 
   const activeFilePath = useMemo(() => {
     if (!selectedFile?.path) return null;
-    return selectedFile.path.startsWith("/") ? selectedFile.path : `/${selectedFile.path}`;
+    return normalizeSandpackPath(selectedFile.path);
   }, [selectedFile]);
 
-  const sandpackConfig = useMemo(() => {
-    const normalizedPaths = new Set(files.map((file) => normalizeSandpackPath(file.path)));
-    const entry =
-      PREVIEW_ENTRY_CANDIDATES.find((candidate) => normalizedPaths.has(candidate)) ||
-      "/src/main.tsx";
+  const sandpackConfig = useMemo(() => buildSandpackConfig(files), [files]);
 
-    const packageFile = files.find(
-      (file) => normalizeSandpackPath(file.path) === "/package.json"
-    );
-
-    let parsedPackage = null;
-    if (packageFile?.content) {
-      try {
-        parsedPackage = JSON.parse(packageFile.content);
-      } catch (error) {
-        console.warn("Failed to parse package.json for preview", error);
-      }
-    }
-
-    const dependencies = {
-      react: "18.2.0",
-      "react-dom": "18.2.0",
-      ...(parsedPackage?.dependencies ?? {})
-    };
-
-    OPTIONAL_PREVIEW_DEV_DEPENDENCIES.forEach((name) => {
-      const version = parsedPackage?.devDependencies?.[name];
-      if (version) {
-        dependencies[name] = version;
-      }
-    });
-
-    const usesTypeScript = entry.endsWith(".ts") || entry.endsWith(".tsx");
-    const devDependencies = parsedPackage?.devDependencies ?? {};
-
-    const ensureDependency = (name, fallback) => {
-      if (!dependencies[name]) {
-        dependencies[name] = devDependencies[name] || fallback;
-      }
-    };
-
-    if (usesTypeScript) {
-      ensureDependency("typescript", "5.6.2");
-      ensureDependency("@types/react", "18.3.3");
-      ensureDependency("@types/react-dom", "18.3.3");
-    }
-
-    ensureDependency("vite", "5.4.0");
-    ensureDependency("@vitejs/plugin-react", "4.3.4");
-
-    const template = usesTypeScript ? "vite-react-ts" : "vite-react";
-
-    return {
-      entry,
-      template,
-      dependencies,
-      bundlerEntry: template.startsWith("vite-") ? "/index.html" : entry
-    };
-  }, [files]);
-
-  const sandpackFiles = useMemo(() => {
-    const map = {};
-
-    const ensure = (path, code) => {
-      if (!map[path]) {
-        map[path] = { code };
-      }
-    };
-
-    const entryScriptPath = sandpackConfig.entry.startsWith("/")
-      ? sandpackConfig.entry
-      : `/${sandpackConfig.entry}`;
-
-    ensure(
-      "/index.html",
-      `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Preview</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="${entryScriptPath}"></script>
-  </body>
-</html>`
-    );
-
-    if (sandpackConfig.template === "vite-react") {
-      ensure(
-        "/src/main.jsx",
-        `import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-`
-      );
-
-      ensure(
-        "/src/App.jsx",
-        `export default function App() {
-  return <h1>Hello from preview</h1>;
-}
-`
-      );
-      ensure(
-        "/vite.config.js",
-        DEFAULT_VITE_CONFIG_JS
-      );
-    } else {
-      ensure(
-        "/src/main.tsx",
-        `import React from 'react';
-import ReactDOM from 'react-dom/client';
-import App from './App';
-
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-`
-      );
-
-      ensure(
-        "/src/App.tsx",
-        `import React from 'react';
-
-const App: React.FC = () => {
-  return <h1>Hello from preview</h1>;
-};
-
-export default App;
-`
-      );
-
-      ensure(
-        "/tsconfig.json",
-        JSON.stringify(
-          {
-            compilerOptions: {
-              target: "ES2020",
-              module: "ESNext",
-              jsx: "react-jsx",
-              moduleResolution: "Bundler",
-              esModuleInterop: true,
-              strict: true,
-              skipLibCheck: true
-            }
-          },
-          null,
-          2
-        )
-      );
-
-      ensure(
-        "/vite.config.ts",
-        DEFAULT_VITE_CONFIG_TS
-      );
-
-      ensure(
-        "/src/vite-env.d.ts",
-        `/// <reference types="vite/client" />`
-      );
-    }
-
-    files.forEach((file) => {
-      const normalizedPath = normalizeSandpackPath(file.path);
-      map[normalizedPath] = {
-        code: file.content ?? "",
-        active: normalizedPath === activeFilePath
-      };
-    });
-
-    const fallbackDependencies = { ...sandpackConfig.dependencies };
-
-    ensure(
-      "/package.json",
-      JSON.stringify(
-        {
-          name: "generated-react-app",
-          version: "1.0.0",
-          private: true,
-          type: "module",
-          scripts: {
-            dev: "vite",
-            build: "vite build",
-            preview: "vite preview",
-            start: "vite"
-          },
-          dependencies: fallbackDependencies
-        },
-        null,
-        2
-      )
-    );
-
-    return map;
-  }, [files, activeFilePath, sandpackConfig]);
+  const sandpackFiles = useMemo(
+    () => buildSandpackFiles(files, activeFilePath, sandpackConfig),
+    [files, activeFilePath, sandpackConfig]
+  );
 
   const handleRuntimeErrorChange = useCallback((message) => {
     setRuntimeError(message || null);
