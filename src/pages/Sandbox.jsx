@@ -23,6 +23,7 @@ const createPackageJson = (dependencies, devDependencies = {}) =>
       type: "module",
       scripts: {
         dev: "vite",
+        start: "npm run dev",
         build: "vite build",
         preview: "vite preview"
       },
@@ -582,6 +583,8 @@ export default function Sandbox() {
             entry: preset.entry
           }}
           options={{
+            autorun: true,
+            initMode: "immediate",
             activeFile: preset.activeFile,
             visibleFiles,
             editorHeight: 520,
@@ -607,6 +610,7 @@ export default function Sandbox() {
                 className="!bg-white"
                 showOpenInCodeSandbox
                 showRefreshButton
+                showRunButton
               />
             </SandpackLayout>
 
