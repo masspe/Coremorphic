@@ -1,1035 +1,275 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  SandpackProvider,
-  SandpackLayout,
-  SandpackPreview,
-  SandpackCodeEditor,
-  SandpackFileExplorer,
-  SandpackConsole,
-  useSandpack,
-  useSandpackShell,
-  useSandpackShellStdout
-} from "@codesandbox/sandpack-react";
-import {
-  ExternalLink,
-  Monitor,
-  Play,
-  RefreshCw,
-  RotateCcw,
-  Terminal
-} from "lucide-react";
+import { io } from "socket.io-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import {
-  getSandboxStatus,
-  canRunSandboxPreview,
-  runSandboxPreviewSafely
-} from "./sandboxControlsLogic";
-import PropTypes from "prop-types";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { ExternalLink, Monitor, Play, RefreshCw, Server, Terminal } from "lucide-react";
 
-const createPackageJson = (dependencies, devDependencies = {}) =>
-  JSON.stringify(
-    {
-      name: "coremorphic-react-sandbox",
-      version: "1.0.0",
-      private: true,
-      type: "module",
-      scripts: {
-        dev: "vite",
-        start: "npm run dev",
-        build: "vite build",
-        preview: "vite preview"
-      },
-      dependencies,
-      devDependencies
-    },
-    null,
-    2
-  );
+const DEFAULT_PREVIEW_PORT = Number(import.meta.env.VITE_SANDBOX_PREVIEW_PORT ?? 4173);
+const MAX_TERMINAL_BUFFER = 60000;
 
-const DEFAULT_VITE_CONFIG_JS = `import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-
-export default defineConfig({
-  plugins: [react()],
-});
-`;
-
-const DEFAULT_VITE_CONFIG_TS = `import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-
-export default defineConfig({
-  plugins: [react()],
-});
-`;
-
-const REACT_JS_PRESET = {
-  label: "React + Vite (JavaScript)",
-  template: "vite-react",
-  entry: "/src/main.jsx",
-  activeFile: "/src/App.jsx",
-  environment: "node",
-  dependencies: {
-    react: "18.2.0",
-    "react-dom": "18.2.0"
-  },
-  devDependencies: {
-    vite: "5.4.0",
-    "@vitejs/plugin-react": "4.3.4"
-  },
-  files: {
-    "/src/App.jsx": `import { useState } from "react";
-import "./App.css";
-
-export default function App() {
-  const [count, setCount] = useState(0);
-
-  return (
-    <div className="sandbox-app">
-      <header>
-        <h1>React Sandbox</h1>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test hot module reloading.
-        </p>
-      </header>
-
-      <section>
-        <p>
-          This playground is powered by Vite and Sandpack. You can add files,
-          install dependencies, and experiment with React components in real time.
-        </p>
-        <button onClick={() => setCount((value) => value + 1)}>
-          count is {count}
-        </button>
-      </section>
-    </div>
-  );
-}
-`,
-    "/src/App.css": `:root {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color-scheme: light;
-  background-color: #f5f5f7;
-}
-
-* {
-  box-sizing: border-box;
-}
-
-body {
-  margin: 0;
-  background: radial-gradient(circle at top, rgba(118, 87, 255, 0.12), transparent 65%),
-    radial-gradient(circle at bottom, rgba(51, 153, 255, 0.12), transparent 60%),
-    #f8fafc;
-  min-height: 100vh;
-}
-
-.sandbox-app {
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 3rem 2.5rem 4rem;
-  display: grid;
-  gap: 2rem;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 30px 60px -25px rgba(15, 23, 42, 0.3);
-}
-
-.sandbox-app header h1 {
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  margin-bottom: 0.75rem;
-  color: #0f172a;
-  font-weight: 800;
-}
-
-.sandbox-app header p {
-  margin: 0;
-  color: #475569;
-  font-size: 1rem;
-}
-
-.sandbox-app section {
-  display: grid;
-  gap: 1.25rem;
-}
-
-.sandbox-app section p {
-  margin: 0;
-  line-height: 1.7;
-  color: #334155;
-}
-
-.sandbox-app button {
-  justify-self: start;
-  padding: 0.85rem 1.5rem;
-  border-radius: 9999px;
-  border: none;
-  font-size: 0.95rem;
-  font-weight: 600;
-  background: linear-gradient(135deg, #7c3aed, #a855f7);
-  color: white;
-  cursor: pointer;
-  transition: transform 160ms ease, box-shadow 160ms ease;
-  box-shadow: 0 18px 35px -18px rgba(124, 58, 237, 0.65);
-}
-
-.sandbox-app button:hover {
-  transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 22px 45px -20px rgba(124, 58, 237, 0.75);
-}
-`,
-    "/src/main.jsx": `import React from "react";
-import ReactDOM from "react-dom/client";
-import App from "./App";
-import "./App.css";
-
-ReactDOM.createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-`,
-    "/index.html": `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>React Sandbox</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
-`,
-    "/package.json": createPackageJson(
-      {
-        react: "18.2.0",
-        "react-dom": "18.2.0"
-      },
-      {
-        vite: "5.4.0",
-        "@vitejs/plugin-react": "4.3.4"
-      }
-    ),
-    "/vite.config.js": DEFAULT_VITE_CONFIG_JS
-  }
+const STATUS_LABELS = {
+  idle: "Idle",
+  connecting: "Connecting",
+  connected: "Connected",
+  ready: "Shell ready",
+  disconnected: "Disconnected",
+  stopped: "Terminal exited"
 };
 
-const REACT_TS_PRESET = {
-  label: "React + Vite (TypeScript)",
-  template: "vite-react-ts",
-  entry: "/src/main.tsx",
-  activeFile: "/src/App.tsx",
-  environment: "node",
-  dependencies: {
-    react: "18.2.0",
-    "react-dom": "18.2.0"
-  },
-  devDependencies: {
-    vite: "5.4.0",
-    "@vitejs/plugin-react": "4.3.4",
-    typescript: "5.6.2",
-    "@types/react": "18.3.3",
-    "@types/react-dom": "18.3.3"
-  },
-  files: {
-    "/src/App.tsx": `import { useState } from "react";
-import "./App.css";
-
-type Todo = {
-  id: number;
-  title: string;
-  completed: boolean;
+const STATUS_CLASSES = {
+  idle: "bg-slate-100 text-slate-600 border border-slate-200",
+  connecting: "bg-amber-100 text-amber-700 border border-amber-200",
+  connected: "bg-sky-100 text-sky-700 border border-sky-200",
+  ready: "bg-emerald-100 text-emerald-700 border border-emerald-200",
+  disconnected: "bg-slate-200 text-slate-700 border border-slate-300",
+  stopped: "bg-rose-100 text-rose-700 border border-rose-200"
 };
 
-const initialTodos: Todo[] = [
-  { id: 1, title: "Explore the sandbox", completed: true },
-  { id: 2, title: "Add a new component", completed: false },
-  { id: 3, title: "Install a dependency", completed: false }
-];
-
-export default function App(): JSX.Element {
-  const [todos, setTodos] = useState(initialTodos);
-
-  const toggleTodo = (id: number) => {
-    setTodos((current) =>
-      current.map((todo) =>
-        todo.id === id ? { ...todo, completed: !todo.completed } : todo
-      )
-    );
-  };
-
-  return (
-    <div className="sandbox-app">
-      <header>
-        <h1>TypeScript Sandbox</h1>
-        <p>Statically typed React components with hot reloading.</p>
-      </header>
-
-      <section>
-        <p>
-          Hover over the todo items to see inferred types in your editor. Modify
-          <code> Todo </code>
-          to evolve the data model on the fly.
-        </p>
-        <ul>
-          {todos.map((todo) => (
-            <li key={todo.id}>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={todo.completed}
-                  onChange={() => toggleTodo(todo.id)}
-                />
-                <span className={todo.completed ? "completed" : undefined}>
-                  {todo.title}
-                </span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
-  );
-}
-`,
-    "/src/App.css": `:root {
-  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  background-color: #f5f5f7;
-  color: #0f172a;
-}
-
-body {
-  margin: 0;
-  min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  background: radial-gradient(circle at top, rgba(118, 87, 255, 0.12), transparent 65%),
-    radial-gradient(circle at bottom, rgba(51, 153, 255, 0.12), transparent 60%),
-    #f8fafc;
-}
-
-.sandbox-app {
-  margin-top: 4rem;
-  max-width: 760px;
-  width: min(760px, 90vw);
-  padding: 3rem 2.5rem 4rem;
-  background: rgba(255, 255, 255, 0.92);
-  border-radius: 28px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  box-shadow: 0 30px 60px -25px rgba(15, 23, 42, 0.3);
-  display: grid;
-  gap: 1.75rem;
-}
-
-.sandbox-app header h1 {
-  font-size: clamp(2rem, 4vw, 2.8rem);
-  margin-bottom: 0.75rem;
-}
-
-.sandbox-app header p {
-  margin: 0;
-  color: #475569;
-}
-
-.sandbox-app section ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: grid;
-  gap: 0.75rem;
-}
-
-.sandbox-app section li {
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.18);
-  border-radius: 16px;
-  padding: 0.85rem 1.1rem;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-
-.sandbox-app section li:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 30px -20px rgba(99, 102, 241, 0.55);
-}
-
-.sandbox-app label {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-  color: #312e81;
-}
-
-.sandbox-app input[type="checkbox"] {
-  width: 1rem;
-  height: 1rem;
-  accent-color: #6366f1;
-}
-
-.sandbox-app .completed {
-  text-decoration: line-through;
-  color: #64748b;
-}
-`,
-    "/src/main.tsx": `import React from "react";
-import ReactDOM from "react-dom/client";
-import App from "./App";
-import "./App.css";
-
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
-);
-`,
-    "/src/vite-env.d.ts": `/// <reference types="vite/client" />
-`,
-    "/tsconfig.json": JSON.stringify(
-      {
-        compilerOptions: {
-          target: "ES2020",
-          useDefineForClassFields: true,
-          lib: ["DOM", "DOM.Iterable", "ES2020"],
-          module: "ESNext",
-          skipLibCheck: true,
-          moduleResolution: "Bundler",
-          allowImportingTsExtensions: true,
-          resolveJsonModule: true,
-          isolatedModules: true,
-          noEmit: true,
-          jsx: "react-jsx"
-        },
-        include: ["src"],
-        references: []
-      },
-      null,
-      2
-    ),
-    "/package.json": createPackageJson(
-      {
-        react: "18.2.0",
-        "react-dom": "18.2.0"
-      },
-      {
-        vite: "5.4.0",
-        "@vitejs/plugin-react": "4.3.4",
-        typescript: "5.6.2",
-        "@types/react": "18.3.3",
-        "@types/react-dom": "18.3.3"
-      }
-    ),
-    "/vite.config.ts": DEFAULT_VITE_CONFIG_TS
-  }
-};
-
-const SANDBOX_PRESETS = {
-  "react-js": REACT_JS_PRESET,
-  "react-ts": REACT_TS_PRESET
-};
-
-const SANDBOX_STATUS_LABELS = {
-  idle: "Ready",
-  running: "Compiling",
-  success: "Running",
-  error: "Error",
-  initial: "Starting",
-  done: "Running",
-  timeout: "Timeout"
-};
-
-const SANDBOX_STATUS_STYLES = {
-  idle: "bg-emerald-100 text-emerald-700 border border-emerald-200",
-  running: "bg-amber-100 text-amber-700 border border-amber-200",
-  success: "bg-sky-100 text-sky-700 border border-sky-200",
-  error: "bg-rose-100 text-rose-700 border border-rose-200",
-  initial: "bg-amber-100 text-amber-700 border border-amber-200",
-  done: "bg-sky-100 text-sky-700 border border-sky-200",
-  timeout: "bg-rose-100 text-rose-700 border border-rose-200"
-};
-
-const TERMINAL_PROGRESS_MESSAGES = {
-  downloading_manifest: "Downloading dependencies…",
-  downloaded_module: "Installing dependencies…",
-  starting_command: "Starting dev server…",
-  command_running: "Running dev server"
-};
-
-const createFileMap = (files, activeFile) => {
-  return Object.fromEntries(
-    Object.entries(files).map(([path, code]) => [
-      path,
-      {
-        code,
-        active: path === activeFile
-      }
-    ])
-  );
-};
-
-function SandboxControls({ onReset }) {
-  const { sandpack } = useSandpack();
-  const status = getSandboxStatus(sandpack);
-  const runSandpack = sandpack?.runSandpack;
-  const canRunPreview = canRunSandboxPreview(status, runSandpack);
-  const { openPreview } = useSandpackShell();
-
-  const handleRunPreview = useCallback(() => {
-    if (runSandpack) {
-      void runSandboxPreviewSafely(runSandpack);
-    }
-  }, [runSandpack]);
-
-  const handleOpenPreview = useCallback(() => {
-    if (typeof openPreview === "function") {
-      openPreview();
-    }
-  }, [openPreview]);
-
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-white/50 bg-white/80 p-4 shadow-sm backdrop-blur-sm md:flex-row md:items-center md:justify-between">
-      <div className="flex flex-col gap-1 text-sm text-slate-600 md:flex-row md:items-center md:gap-3">
-        <span className={cn(
-          "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
-          SANDBOX_STATUS_STYLES[status] || SANDBOX_STATUS_STYLES.idle
-        )}>
-          <Monitor className="h-4 w-4" />
-          {SANDBOX_STATUS_LABELS[status] || SANDBOX_STATUS_LABELS.idle}
-        </span>
-        <span className="text-xs md:text-sm">
-          Bundler status: {SANDBOX_STATUS_LABELS[status] || SANDBOX_STATUS_LABELS.idle}
-        </span>
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <Button
-          type="button"
-          variant="outline"
-          className="bg-white/90"
-          onClick={onReset}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" /> Reset sandbox
-        </Button>
-        <Button
-          type="button"
-          className="bg-purple-600 hover:bg-purple-700"
-          onClick={handleRunPreview}
-          disabled={!canRunPreview}
-        >
-          <Play className="mr-2 h-4 w-4" /> Run preview
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="bg-white/90"
-          onClick={handleOpenPreview}
-        >
-          <ExternalLink className="mr-2 h-4 w-4" /> Open preview window
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-SandboxControls.propTypes = {
-  onReset: PropTypes.func.isRequired
-};
-
-function SandboxTerminal() {
-  const { sandpack, listen } = useSandpack();
-  const { restart, openPreview } = useSandpackShell();
-  const { logs, reset } = useSandpackShellStdout({
-    resetOnPreviewRestart: true
+const createSocket = (projectId) =>
+  io("/", {
+    path: "/socket.io",
+    transports: ["websocket"],
+    query: { projectId }
   });
-  const status = getSandboxStatus(sandpack);
-  const statusLabel =
-    SANDBOX_STATUS_LABELS[status] || SANDBOX_STATUS_LABELS.idle;
-  const statusClassName =
-    SANDBOX_STATUS_STYLES[status] || SANDBOX_STATUS_STYLES.idle;
 
-  const [progress, setProgress] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState(null);
-  const [commandHistory, setCommandHistory] = useState([]);
-  const [commandInput, setCommandInput] = useState("");
-  const [isRunningCommand, setIsRunningCommand] = useState(false);
-  const outputRef = useRef(null);
-  const installTriggeredRef = useRef(false);
-  const commandIdRef = useRef(0);
+function useProjects(initialProjectId, setProjectId) {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const getActiveClient = useCallback(() => {
-    const clients = sandpack?.clients ?? {};
-    const [clientId] = Object.keys(clients);
-    return clientId ? clients[clientId] : null;
-  }, [sandpack?.clients]);
+  const fetchProjects = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/projects");
+      if (!response.ok) {
+        throw new Error(`Failed to load projects (status ${response.status})`);
+      }
+      const data = await response.json();
+      setProjects(data);
 
-  const appendCommandHistory = useCallback((entry) => {
-    const id = `cmd-${commandIdRef.current++}`;
-    setCommandHistory((history) => [...history, { ...entry, id }]);
-    return id;
-  }, []);
+      if (!data.length) {
+        setProjectId("");
+        return;
+      }
 
-  const updateCommandHistory = useCallback((id, updates) => {
-    setCommandHistory((history) =>
-      history.map((entry) => (entry.id === id ? { ...entry, ...updates } : entry))
-    );
-  }, []);
-
-  const parseShellCommand = useCallback((input) => {
-    const matches = input.match(
-      /(?:[^\s"']+|"(?:\\.|[^"])*"|'(?:\\.|[^'])*')+/g
-    );
-
-    if (!matches || matches.length === 0) {
-      return null;
+      const hasExistingSelection = data.some((project) => project.id === initialProjectId);
+      if (!hasExistingSelection) {
+        setProjectId(data[0].id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
     }
-
-    const normalized = matches.map((token) => {
-      if (
-        (token.startsWith("\"") && token.endsWith("\"")) ||
-        (token.startsWith("'") && token.endsWith("'"))
-      ) {
-        return token.slice(1, -1);
-      }
-
-      return token;
-    });
-
-    const [commandName, ...args] = normalized;
-
-    if (!commandName) {
-      return null;
-    }
-
-    return { command: commandName, args };
-  }, []);
-
-  const executeManualCommand = useCallback(
-    async (rawInput) => {
-      const trimmed = rawInput.trim();
-
-      if (!trimmed) {
-        return;
-      }
-
-      const parsed = parseShellCommand(trimmed);
-
-      if (!parsed) {
-        appendCommandHistory({
-          command: trimmed,
-          status: "error",
-          error: "Unable to parse command.",
-          source: "manual"
-        });
-        return;
-      }
-
-      const client = getActiveClient();
-
-      if (!client?.emulatorShellProcess?.runCommand) {
-        appendCommandHistory({
-          command: trimmed,
-          status: "error",
-          error: "Sandbox shell is unavailable.",
-          source: "manual"
-        });
-        return;
-      }
-
-      setIsRunningCommand(true);
-      const historyId = appendCommandHistory({
-        command: trimmed,
-        status: "running",
-        source: "manual"
-      });
-
-      try {
-        await client.emulatorShellProcess.runCommand(
-          parsed.command,
-          parsed.args
-        );
-        updateCommandHistory(historyId, { status: "done" });
-      } catch (error) {
-        updateCommandHistory(historyId, {
-          status: "error",
-          error: error instanceof Error ? error.message : String(error)
-        });
-      } finally {
-        setIsRunningCommand(false);
-      }
-    },
-    [appendCommandHistory, getActiveClient, parseShellCommand, updateCommandHistory]
-  );
-
-  const handleCommandSubmit = useCallback(
-    async (event) => {
-      event.preventDefault();
-
-      const value = commandInput.trim();
-
-      if (!value) {
-        return;
-      }
-
-      setCommandInput("");
-      await executeManualCommand(value);
-    },
-    [commandInput, executeManualCommand]
-  );
+  }, [initialProjectId, setProjectId]);
 
   useEffect(() => {
-    const unsubscribe = listen((message) => {
-      if (message.type === "shell/progress") {
-        const nextState = {
-          state: message.data?.state ?? null,
-          command: message.data?.command?.trim() || null
-        };
-        setProgress(nextState);
-      } else if (message.type === "done") {
-        setProgress((current) =>
-          current ? { ...current, state: "done" } : { state: "done" }
-        );
-      } else if (message.type === "urlchange" && typeof message.url === "string") {
-        setPreviewUrl(message.url);
-      }
-    });
+    void fetchProjects();
+  }, [fetchProjects]);
 
-    return () => {
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
-      }
-    };
-  }, [listen]);
-
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [logs]);
-
-  const command = progress?.command || "npm run dev";
-  const hasLogs = logs.length > 0;
-  const logText = logs.map((entry) => entry.data).join("");
-
-  const activeHistoryCommand = useMemo(
-    () => commandHistory.find((entry) => entry.status === "running"),
-    [commandHistory]
-  );
-
-  const baseCommandEntry = useMemo(() => {
-    let commandStatus = "running";
-
-    if (status === "error" || status === "timeout") {
-      commandStatus = "error";
-    } else if (status === "success" || status === "done" || status === "idle") {
-      commandStatus = "done";
-    }
-
-    return {
-      id: "dev-command",
-      command,
-      status: commandStatus,
-      source: "sandbox"
-    };
-  }, [command, status]);
-
-  const commandsForDisplay = useMemo(
-    () => [...commandHistory, baseCommandEntry],
-    [baseCommandEntry, commandHistory]
-  );
-
-  const progressLabel = useMemo(() => {
-    if (activeHistoryCommand) {
-      return `Running "${activeHistoryCommand.command}"`;
-    }
-
-    if (status === "error" || status === "timeout") {
-      return "Dev server encountered an error";
-    }
-
-    if (status === "success" || status === "done" || status === "idle") {
-      return "Dev server ready";
-    }
-
-    if (progress?.state) {
-      if (progress.state === "command_running") {
-        return progress.command
-          ? `Running "${progress.command}"`
-          : TERMINAL_PROGRESS_MESSAGES.command_running;
-      }
-
-      return (
-        TERMINAL_PROGRESS_MESSAGES[progress.state] ||
-        "Preparing workspace…"
-      );
-    }
-
-    return "Preparing workspace…";
-  }, [activeHistoryCommand, progress, status]);
-
-  useEffect(() => {
-    if (installTriggeredRef.current) {
-      return;
-    }
-
-    if (
-      progress?.state !== "command_running" ||
-      typeof progress.command !== "string" ||
-      !progress.command.includes("npm run dev")
-    ) {
-      return;
-    }
-
-    const client = getActiveClient();
-
-    if (!client?.emulatorShellProcess?.runCommand) {
-      return;
-    }
-
-    installTriggeredRef.current = true;
-
-    const installCommandId = appendCommandHistory({
-      command: "npm install",
-      status: "running",
-      source: "auto"
-    });
-
-    (async () => {
-      try {
-        await client.emulatorShellProcess.runCommand("npm", ["install"]);
-        updateCommandHistory(installCommandId, { status: "done" });
-        if (typeof restart === "function") {
-          restart();
-        }
-      } catch (error) {
-        updateCommandHistory(installCommandId, {
-          status: "error",
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    })();
-  }, [appendCommandHistory, getActiveClient, progress, restart, updateCommandHistory]);
-
-  const handleRestart = useCallback(() => {
-    if (typeof restart === "function") {
-      restart();
-    }
-    reset();
-  }, [restart, reset]);
-
-  const handleOpenPreview = useCallback(() => {
-    if (previewUrl) {
-      window.open(previewUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    if (typeof openPreview === "function") {
-      openPreview();
-    }
-  }, [openPreview, previewUrl]);
-
-  const handleClear = useCallback(() => {
-    reset();
-  }, [reset]);
-
-  return (
-    <div className="rounded-2xl border border-slate-800 bg-slate-950/95 text-slate-100 shadow-xl">
-      <div className="flex flex-col gap-3 border-b border-white/10 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-3 text-sm font-medium">
-          <span className="inline-flex items-center gap-2">
-            <Terminal className="h-4 w-4" /> Dev server terminal
-          </span>
-          <span
-            className={cn(
-              "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide",
-              statusClassName
-            )}
-          >
-            {statusLabel}
-          </span>
-        </div>
-        <span className="text-xs text-slate-400">{progressLabel}</span>
-      </div>
-      <div
-        ref={outputRef}
-        className="max-h-64 overflow-auto px-4 py-4 font-mono text-xs leading-relaxed"
-        data-testid="sandbox-terminal-output"
-      >
-        <div className="space-y-2">
-          {commandsForDisplay.map((entry) => {
-            const isRunning = entry.status === "running";
-            const isSuccess = entry.status === "done";
-            const isError = entry.status === "error";
-
-            const commandClassName = cn({
-              "text-emerald-300": isSuccess,
-              "text-amber-300": isRunning,
-              "text-rose-300": isError,
-              "text-emerald-200": entry.source === "sandbox" && !isRunning && !isError
-            });
-
-            return (
-              <div key={entry.id} className="whitespace-pre-wrap">
-                <span className={commandClassName}>{`> ${entry.command}`}</span>
-                {isRunning ? "\nRunning…" : null}
-                {isError && entry.error ? (
-                  <>
-                    {"\n"}
-                    <span className="text-rose-300/80">{entry.error}</span>
-                  </>
-                ) : null}
-              </div>
-            );
-          })}
-          <div className="whitespace-pre-wrap text-slate-100">
-            {hasLogs ? logText : "Waiting for dev server output…"}
-          </div>
-        </div>
-      </div>
-      <div className="flex flex-col gap-4 border-t border-white/10 px-4 py-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-xs text-slate-400">
-            Output from the sandboxed Vite development server.
-          </span>
-          <form
-            onSubmit={handleCommandSubmit}
-            className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row"
-          >
-            <Input
-              value={commandInput}
-              onChange={(event) => setCommandInput(event.target.value)}
-              placeholder="Enter a shell command"
-              className="border-slate-800 bg-slate-900/60 text-xs text-slate-100 placeholder:text-slate-500"
-            />
-            <Button
-              type="submit"
-              size="sm"
-              className="bg-purple-600 hover:bg-purple-700"
-              disabled={isRunningCommand || commandInput.trim() === ""}
-            >
-              Run command
-            </Button>
-          </form>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-slate-700 bg-slate-900/50 text-slate-100 hover:bg-slate-900"
-            onClick={handleRestart}
-          >
-            <RotateCcw className="h-3.5 w-3.5" /> Restart dev server
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="border-slate-700 bg-slate-900/50 text-slate-100 hover:bg-slate-900"
-            onClick={handleOpenPreview}
-            disabled={!previewUrl && status !== "done" && status !== "success" && status !== "idle"}
-          >
-            <ExternalLink className="h-3.5 w-3.5" /> Open in new tab
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="text-slate-300 hover:bg-slate-900"
-            onClick={handleClear}
-          >
-            Clear output
-          </Button>
-        </div>
-      </div>
-    </div>
+  return useMemo(
+    () => ({
+      projects,
+      loading,
+      error,
+      refresh: fetchProjects
+    }),
+    [projects, loading, error, fetchProjects]
   );
 }
 
 export default function Sandbox() {
-  const [presetKey, setPresetKey] = useState("react-js");
-  const [sessionKey, setSessionKey] = useState(0);
+  const [projectId, setProjectId] = useState("");
+  const { projects, loading, error: projectsError, refresh } = useProjects(projectId, setProjectId);
+  const [terminalOutput, setTerminalOutput] = useState("");
+  const [terminalStatus, setTerminalStatus] = useState("idle");
+  const [terminalExitInfo, setTerminalExitInfo] = useState(null);
+  const [socketError, setSocketError] = useState(null);
+  const [previewError, setPreviewError] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewPort, setPreviewPort] = useState(String(DEFAULT_PREVIEW_PORT));
+  const socketRef = useRef(null);
+  const terminalRef = useRef(null);
 
-  const preset = useMemo(
-    () => SANDBOX_PRESETS[presetKey] ?? REACT_JS_PRESET,
-    [presetKey]
-  );
+  useEffect(() => {
+    setPreviewPort(String(DEFAULT_PREVIEW_PORT));
+  }, [projectId]);
 
-  const sandpackFiles = useMemo(
-    () => {
-      void sessionKey;
-      return createFileMap(preset.files, preset.activeFile);
+  useEffect(() => {
+    if (!projectId) {
+      setTerminalStatus("idle");
+      setTerminalOutput("");
+      setPreviewUrl("");
+      setSocketError(null);
+      setPreviewError(null);
+      return;
+    }
+
+    const socket = createSocket(projectId);
+    socketRef.current = socket;
+    setTerminalStatus("connecting");
+    setTerminalOutput("");
+    setPreviewUrl("");
+    setTerminalExitInfo(null);
+    setSocketError(null);
+    setPreviewError(null);
+
+    const handleConnect = () => setTerminalStatus("connected");
+    const handleDisconnect = () => {
+      setTerminalStatus("disconnected");
+      setPreviewUrl("");
+    };
+    const handleReady = () => setTerminalStatus("ready");
+    const handleData = (chunk) => {
+      const text = typeof chunk === "string" ? chunk : String(chunk ?? "");
+      setTerminalOutput((current) => {
+        const next = current + text;
+        if (next.length <= MAX_TERMINAL_BUFFER) return next;
+        return next.slice(next.length - MAX_TERMINAL_BUFFER);
+      });
+    };
+    const handleExit = (payload) => {
+      setTerminalExitInfo(payload ?? null);
+      setTerminalStatus("stopped");
+    };
+    const handleSocketError = (payload) => {
+      const message = payload?.message || "Sandbox error";
+      setSocketError(message);
+    };
+    const handleTerminalError = (payload) => {
+      const message = payload?.message || "Terminal error";
+      setSocketError(message);
+    };
+    const handlePreviewReady = (payload) => {
+      setPreviewError(null);
+      setPreviewUrl(payload?.url || "");
+    };
+    const handlePreviewClosed = () => {
+      setPreviewUrl("");
+    };
+    const handlePreviewError = (payload) => {
+      const message = payload?.message || "Preview unavailable";
+      setPreviewError(message);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleSocketError);
+    socket.on("terminal:ready", handleReady);
+    socket.on("terminal:data", handleData);
+    socket.on("terminal:exit", handleExit);
+    socket.on("terminal:error", handleTerminalError);
+    socket.on("sandbox:error", handleSocketError);
+    socket.on("preview:ready", handlePreviewReady);
+    socket.on("preview:closed", handlePreviewClosed);
+    socket.on("preview:error", handlePreviewError);
+
+    return () => {
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleSocketError);
+      socket.off("terminal:ready", handleReady);
+      socket.off("terminal:data", handleData);
+      socket.off("terminal:exit", handleExit);
+      socket.off("terminal:error", handleTerminalError);
+      socket.off("sandbox:error", handleSocketError);
+      socket.off("preview:ready", handlePreviewReady);
+      socket.off("preview:closed", handlePreviewClosed);
+      socket.off("preview:error", handlePreviewError);
+      socket.disconnect();
+      if (socketRef.current === socket) {
+        socketRef.current = null;
+      }
+    };
+  }, [projectId]);
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [terminalOutput]);
+
+  useEffect(() => {
+    if (terminalStatus !== "ready") return undefined;
+    const resolvedPort = previewPort ? Number(previewPort) : DEFAULT_PREVIEW_PORT;
+    if (!Number.isInteger(resolvedPort) || resolvedPort <= 0) return undefined;
+    const socket = socketRef.current;
+    if (!socket) return undefined;
+
+    socket.emit("preview:open", { port: resolvedPort });
+
+    return () => {
+      socket.emit("preview:close", { port: resolvedPort });
+    };
+  }, [terminalStatus, previewPort]);
+
+  const handleCommandSubmit = useCallback(
+    (event) => {
+      event.preventDefault();
+      const formData = new FormData(event.currentTarget);
+      const value = String(formData.get("command") ?? "").trim();
+      if (!value || !socketRef.current) return;
+      socketRef.current.emit("terminal:input", value.endsWith("\n") ? value : `${value}\n`);
+      event.currentTarget.reset();
     },
-    [preset, sessionKey]
+    []
   );
 
-  const visibleFiles = useMemo(
-    () => Object.keys(preset.files),
-    [preset]
-  );
+  const handlePreviewReconnect = useCallback(() => {
+    if (terminalStatus !== "ready" || !socketRef.current) return;
+    const resolvedPort = previewPort ? Number(previewPort) : DEFAULT_PREVIEW_PORT;
+    if (!Number.isInteger(resolvedPort) || resolvedPort <= 0) return;
+    socketRef.current.emit("preview:open", { port: resolvedPort });
+  }, [previewPort, terminalStatus]);
 
-  const sandpackSetup = useMemo(
-    () => ({
-      dependencies: preset.dependencies,
-      devDependencies: preset.devDependencies,
-      entry: preset.entry,
-      environment: preset.environment ?? "node"
-    }),
-    [preset]
-  );
+  const handleOpenPreviewInNewTab = useCallback(() => {
+    if (!previewUrl) return;
+    window.open(previewUrl, "_blank", "noopener,noreferrer");
+  }, [previewUrl]);
 
-  const handleReset = () => setSessionKey((key) => key + 1);
+  const activeProjectName = useMemo(() => {
+    const project = projects.find((item) => item.id === projectId);
+    return project?.name ?? "Select a project";
+  }, [projectId, projects]);
 
-  const handlePresetChange = (value) => {
-    setPresetKey(value);
-    setSessionKey((key) => key + 1);
-  };
+  const statusLabel = STATUS_LABELS[terminalStatus] || STATUS_LABELS.idle;
+  const statusClassName = STATUS_CLASSES[terminalStatus] || STATUS_CLASSES.idle;
+
+  const aggregatedErrors = [projectsError, socketError, previewError].filter(Boolean);
 
   return (
     <div className="space-y-8">
-      <div className="backdrop-blur-2xl bg-white/30 border border-white/40 rounded-3xl px-8 py-10 shadow-2xl">
-        <div className="mx-auto flex max-w-4xl flex-col gap-4 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500/90 to-indigo-500/90 text-white shadow-lg">
-            <Play className="h-8 w-8" />
-          </div>
-          <h1 className="text-4xl font-bold text-slate-900">Interactive React Sandbox</h1>
-          <p className="text-base text-slate-700">
-            Build and run React components instantly with an embedded Vite + Sandpack environment.
-            Choose between JavaScript or TypeScript starters, install dependencies, and iterate in real time.
-          </p>
-          <div className="grid gap-4 pt-4 sm:grid-cols-3">
-            {["Hot module reloading", "Full file explorer", "Live console output"].map((feature) => (
-              <div
-                key={feature}
-                className="rounded-2xl border border-white/40 bg-white/40 px-4 py-3 text-sm font-medium text-slate-700 shadow-sm"
-              >
-                {feature}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex flex-col gap-4 rounded-2xl border border-white/50 bg-white/60 p-5 shadow-xl backdrop-blur-sm md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-xl font-semibold text-slate-900">Sandbox workspace</h2>
-            <p className="text-sm text-slate-600">
-              Switch starters or reset the environment to begin from a clean slate.
+      <section className="rounded-3xl border border-white/40 bg-white/60 px-8 py-10 shadow-2xl backdrop-blur">
+        <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+          <div className="space-y-3">
+            <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-purple-500 to-indigo-500 text-white shadow-lg">
+              <Play className="h-8 w-8" />
+            </div>
+            <h1 className="text-4xl font-bold text-slate-900">Project sandboxes</h1>
+            <p className="max-w-2xl text-sm text-slate-600">
+              Launch an isolated Linux workspace for each project, stream shell output directly in your browser, and preview any dev
+              server exposed from the sandbox VM.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="w-full sm:w-60">
-              <Select value={presetKey} onValueChange={handlePresetChange}>
+            <div className="w-full sm:w-72">
+              <Select value={projectId} onValueChange={setProjectId} disabled={loading || !projects.length}>
                 <SelectTrigger className="w-full bg-white/80">
-                  <SelectValue placeholder="Select a starter" />
+                  <SelectValue placeholder="Select a project" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(SANDBOX_PRESETS).map(([value, config]) => (
-                    <SelectItem key={value} value={value}>
-                      {config.label}
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id}>
+                      {project.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1038,64 +278,137 @@ export default function Sandbox() {
             <Button
               type="button"
               variant="outline"
-              className="bg-white/90"
-              onClick={handleReset}
+              className="bg-white/80"
+              onClick={() => void refresh()}
+              disabled={loading}
             >
-              <RefreshCw className="mr-2 h-4 w-4" /> Reset files
+              <RefreshCw className="mr-2 h-4 w-4" /> Refresh projects
             </Button>
           </div>
         </div>
-
-        <SandpackProvider
-          key={`${presetKey}-${sessionKey}`}
-          template={preset.template}
-          files={sandpackFiles}
-          customSetup={sandpackSetup}
-          options={{
-            autorun: true,
-            initMode: "immediate",
-            activeFile: preset.activeFile,
-            visibleFiles,
-            editorHeight: 520,
-            showTabs: true,
-            closableTabs: true,
-            recompileDelay: 300
-          }}
-          theme="light"
-        >
-          <div className="space-y-4">
-            <SandboxControls onReset={handleReset} />
-
-            <SandpackLayout className="overflow-hidden rounded-3xl border border-white/60 bg-white/80 shadow-2xl">
-              <SandpackFileExplorer className="hidden w-64 border-r border-white/50 bg-white/70 p-4 text-sm text-slate-700 lg:block" />
-              <SandpackCodeEditor
-                className="!bg-white/60"
-                showLineNumbers
-                showInlineErrors
-                wrapContent
-                showTabs
-              />
-              <SandpackPreview
-                className="!bg-white"
-                showOpenInCodeSandbox
-                showRefreshButton
-                showRunButton
-              />
-            </SandpackLayout>
-
-            <SandboxTerminal />
-
-            <div className="rounded-2xl border border-white/60 bg-slate-950/90 text-slate-100 shadow-xl">
-              <div className="flex items-center gap-2 border-b border-white/10 px-4 py-3 text-sm font-medium">
-                <Terminal className="h-4 w-4" /> Runtime console
-              </div>
-              <SandpackConsole
-                showHeader={false}
-                className="max-h-60 overflow-auto text-sm"
-              />
-            </div>
+        {!projects.length && !loading ? (
+          <p className="mt-6 text-sm text-slate-600">
+            No projects found. Create a project from the builder to launch a sandbox session.
+          </p>
+        ) : null}
+        {aggregatedErrors.length ? (
+          <div className="mt-6 space-y-2 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+            {aggregatedErrors.map((message, index) => (
+              <p key={index}>{message}</p>
+            ))}
           </div>
-        </SandpackProvider>
+        ) : null}
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="space-y-6">
+          <section className="rounded-3xl border border-slate-900 bg-slate-950 text-slate-100 shadow-2xl">
+            <div className="flex flex-col gap-3 border-b border-slate-800 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span className="inline-flex items-center gap-2">
+                  <Terminal className="h-4 w-4" /> {activeProjectName}
+                </span>
+                <span className={cn("inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase", statusClassName)}>
+                  {statusLabel}
+                </span>
+              </div>
+              {terminalExitInfo ? (
+                <span className="text-xs text-slate-400">
+                  Process exited with code {String(terminalExitInfo.code ?? "?")} {terminalExitInfo.signal ? `(signal ${terminalExitInfo.signal})` : ""}
+                </span>
+              ) : (
+                <span className="text-xs text-slate-400">Interactive shell connected to the sandbox VM.</span>
+              )}
+            </div>
+            <div
+              ref={terminalRef}
+              className="h-80 overflow-auto px-5 py-4 font-mono text-xs leading-relaxed"
+              data-testid="sandbox-terminal-output"
+            >
+              <pre className="whitespace-pre-wrap text-slate-100">{terminalOutput || "Connecting to sandbox…"}</pre>
+            </div>
+            <form onSubmit={handleCommandSubmit} className="flex flex-col gap-3 border-t border-slate-800 px-5 py-4 sm:flex-row sm:items-center">
+              <Input
+                name="command"
+                placeholder="Enter a shell command (e.g. npm install)"
+                className="border-slate-700 bg-slate-900 text-xs text-slate-100 placeholder:text-slate-500"
+                autoComplete="off"
+              />
+              <Button
+                type="submit"
+                size="sm"
+                className="bg-purple-600 text-white hover:bg-purple-700"
+                disabled={terminalStatus === "disconnected" || terminalStatus === "idle"}
+              >
+                Send command
+              </Button>
+            </form>
+          </section>
+        </div>
+
+        <div className="space-y-6">
+          <section className="rounded-3xl border border-white/60 bg-white/80 shadow-xl backdrop-blur">
+            <div className="flex items-center justify-between gap-2 border-b border-white/70 px-5 py-4">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <Monitor className="h-4 w-4" /> Sandbox preview
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                Forwarded port
+                <Input
+                  value={previewPort}
+                  onChange={(event) => {
+                    const digits = event.target.value.replace(/[^0-9]/g, "");
+                    setPreviewPort(digits || "");
+                  }}
+                  className="h-8 w-20 border-slate-200 text-xs"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                />
+                <Button type="button" size="sm" variant="outline" className="border-slate-200" onClick={handlePreviewReconnect}>
+                  <Server className="mr-2 h-4 w-4" /> Reconnect
+                </Button>
+              </div>
+            </div>
+            <div className="relative aspect-video overflow-hidden rounded-b-3xl border-t border-white/60">
+              {previewUrl ? (
+                <iframe
+                  title="Sandbox preview"
+                  src={previewUrl}
+                  className="h-full w-full"
+                  allow="accelerometer; ambient-light-sensor; autoplay; camera; encrypted-media; geolocation; gyroscope; microphone; midi"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500">
+                  {previewError ||
+                    (terminalStatus === "ready"
+                      ? "Waiting for the dev server to expose a port…"
+                      : "Preview available once the sandbox shell is ready.")}
+                </div>
+              )}
+              {previewUrl ? (
+                <div className="absolute bottom-4 right-4 flex items-center gap-2">
+                  <Button type="button" size="sm" variant="secondary" onClick={handleOpenPreviewInNewTab}>
+                    <ExternalLink className="mr-2 h-4 w-4" /> Open in new tab
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-white/60 bg-white/80 p-5 shadow-xl backdrop-blur">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <Terminal className="h-4 w-4" /> Getting started
+            </h2>
+            <ol className="mt-3 space-y-2 text-sm text-slate-600">
+              <li>1. Select a project above to launch its dedicated sandbox VM.</li>
+              <li>
+                2. Use the terminal to install dependencies and start your dev server (for example, <code>npm install</code> then{" "}
+                <code>{`npm run dev -- --host --port ${previewPort || DEFAULT_PREVIEW_PORT}`}</code>).
+              </li>
+              <li>3. Once the server is running, the forwarded port will load inside the preview frame automatically.</li>
+            </ol>
+          </section>
+        </div>
       </div>
     </div>
   );
