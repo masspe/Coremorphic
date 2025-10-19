@@ -29,7 +29,12 @@ const request = async (path, { method = "GET", body, headers } = {}) => {
 
 const projects = {
   list: () => request("/projects"),
-  create: (name) => request("/projects", { method: "POST", body: { name } })
+  create: (name) => request("/projects", { method: "POST", body: { name } }),
+  search: (projectId, params) =>
+    request(`/projects/${projectId}/search`, { method: "POST", body: params }),
+  compile: (projectId) => request(`/projects/${projectId}/compile`, { method: "POST" }),
+  autofix: (projectId, payload) =>
+    request(`/projects/${projectId}/autofix`, { method: "POST", body: payload })
 };
 
 const memory = {

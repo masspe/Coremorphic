@@ -1,8 +1,19 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Sparkles, Send, Loader2, MessageSquare, FileText, StickyNote, RefreshCw } from "lucide-react";
+import {
+  Sparkles,
+  Send,
+  Loader2,
+  MessageSquare,
+  FileText,
+  StickyNote,
+  RefreshCw,
+  FileSearch,
+  Search
+} from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { backend } from "@/api/backendClient";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +39,10 @@ export default function AIAssistant({ projectId }) {
   const [memory, setMemory] = useState("");
   const [memoryDraft, setMemoryDraft] = useState("");
   const [isSavingMemory, setIsSavingMemory] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchStatus, setSearchStatus] = useState(null);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -50,11 +65,178 @@ export default function AIAssistant({ projectId }) {
   }, [projectId]);
 
   useEffect(() => {
+    setSearchResults([]);
+    setSearchStatus(null);
+  }, [projectId]);
+
+  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const appendMessage = useCallback((message) => {
     setMessages((prev) => [...prev, message]);
+  }, [setMessages]);
+
+  const resolveLoadingMessage = useCallback((message) => {
+    setMessages((prev) => {
+      const next = [...prev];
+      for (let index = next.length - 1; index >= 0; index -= 1) {
+        if (next[index].loading) {
+          next[index] = { role: "assistant", ...(message ?? {}) };
+          return next;
+        }
+      }
+      return next.concat({ role: "assistant", ...(message ?? {}) });
+    });
+  }, [setMessages]);
+
+  const formatCompilationErrors = useCallback((result) => {
+    if (!result) {
+      return "Build failed.";
+    }
+
+    const segments = [];
+    if (result.message) {
+      segments.push(result.message);
+    }
+
+    if (Array.isArray(result.errors) && result.errors.length > 0) {
+      const details = result.errors
+        .map((error, index) => {
+          const lines = [`${index + 1}. ${error.text}`];
+          const location = error.location ?? {};
+          if (location.file) lines.push(`File: ${location.file}`);
+          if (typeof location.line === "number") {
+            const columnText =
+              typeof location.column === "number" ? `, Column: ${location.column}` : "";
+            lines.push(`Line: ${location.line}${columnText}`);
+          }
+          if (location.lineText) lines.push(`Code: ${location.lineText}`);
+          return lines.join("\n");
+        })
+        .join("\n\n");
+      segments.push(details);
+    }
+
+    return segments.join("\n\n");
+  }, []);
+
+  const attemptAutoFix = useCallback(
+    async (compileResult, originalPrompt) => {
+      if (!projectId || !compileResult?.errors?.length) {
+        return;
+      }
+
+      appendMessage({
+        role: "assistant",
+        content: "Attempting automatic fix for the build errors...",
+        loading: true
+      });
+
+      try {
+        const response = await backend.projects.autofix(projectId, {
+          errors: compileResult.errors,
+          prompt: originalPrompt,
+          model: selectedModel
+        });
+
+        const result = response?.result ?? {};
+        const generatedFiles = Object.entries(result.files ?? {}).map(([path, content]) => ({
+          path,
+          content
+        }));
+
+        setFiles(generatedFiles);
+        setNotes(
+          result.notes ?? "Applied automatic fixes to address the reported build errors."
+        );
+
+        resolveLoadingMessage({
+          content:
+            result.notes ||
+            `Applied automatic fixes to ${generatedFiles.length} file${
+              generatedFiles.length === 1 ? "" : "s"
+            }. Review the updates in the code panel.`
+        });
+
+        window.dispatchEvent(new CustomEvent("files-updated"));
+
+        appendMessage({
+          role: "assistant",
+          content: "Re-running compilation after automatic fixes...",
+          loading: true
+        });
+
+        const verification = await backend.projects.compile(projectId);
+        if (verification?.ok) {
+          resolveLoadingMessage({ content: "✅ Build passed after automatic fixes." });
+        } else {
+          resolveLoadingMessage({
+            content: `⚠️ Build still failing after automatic fixes:\n${formatCompilationErrors(
+              verification
+            )}`
+          });
+        }
+      } catch (error) {
+        console.error("Automatic fix failed", error);
+        resolveLoadingMessage({
+          content: `Automatic fix failed: ${error.message}`
+        });
+      }
+    },
+    [projectId, selectedModel, appendMessage, resolveLoadingMessage, formatCompilationErrors]
+  );
+
+  const handleSearchSubmit = useCallback(
+    async (event) => {
+      event?.preventDefault();
+      const query = searchQuery.trim();
+
+      if (!query) {
+        setSearchResults([]);
+        setSearchStatus(null);
+        return;
+      }
+
+      if (!projectId) {
+        setSearchStatus({ type: "info", message: "Open or create a project to search its files." });
+        return;
+      }
+
+      setIsSearching(true);
+      setSearchStatus(null);
+
+      try {
+        const response = await backend.projects.search(projectId, { query, limit: 30 });
+        const results = Array.isArray(response?.results) ? response.results : [];
+        setSearchResults(results);
+
+        if (results.length === 0) {
+          setSearchStatus({ type: "info", message: "No matches found." });
+        }
+      } catch (error) {
+        console.error("Search failed", error);
+        setSearchResults([]);
+        setSearchStatus({ type: "error", message: error.message || "Search failed" });
+      } finally {
+        setIsSearching(false);
+      }
+    },
+    [projectId, searchQuery]
+  );
+
+  const handleOpenSearchResult = useCallback((result) => {
+    if (!result?.path) return;
+
+    window.dispatchEvent(
+      new CustomEvent("open-file", {
+        detail: {
+          path: result.path,
+          line: result.line,
+          column: result.column
+        }
+      })
+    );
   }, []);
 
   const handleSend = useCallback(async (overridePrompt) => {
@@ -86,31 +268,58 @@ export default function AIAssistant({ projectId }) {
       setFiles(generatedFiles);
       setNotes(result.notes ?? "Generated new files for your project.");
 
-      setMessages((prev) =>
-        prev
-          .filter((message) => !message.loading)
-          .concat({
-            role: "assistant",
-            content:
-              result.notes ||
-              `Generated ${generatedFiles.length} file${generatedFiles.length === 1 ? "" : "s"}. Review them in the code panel.`
-          })
-      );
+      resolveLoadingMessage({
+        content:
+          result.notes ||
+          `Generated ${generatedFiles.length} file${generatedFiles.length === 1 ? "" : "s"}. Review them in the code panel.`
+      });
 
       window.dispatchEvent(new CustomEvent("files-updated"));
+
+      appendMessage({
+        role: "assistant",
+        content: "Running compilation checks...",
+        loading: true
+      });
+
+      try {
+        const compilation = await backend.projects.compile(projectId);
+        if (compilation?.ok) {
+          resolveLoadingMessage({ content: "✅ Build passed without compile errors." });
+        } else {
+          resolveLoadingMessage({
+            content: `⚠️ Build failed:\n${formatCompilationErrors(compilation)}`
+          });
+
+          if (Array.isArray(compilation?.errors) && compilation.errors.length > 0) {
+            await attemptAutoFix(compilation, trimmed);
+          }
+        }
+      } catch (error) {
+        console.error("Compilation check failed", error);
+        resolveLoadingMessage({
+          content: `⚠️ Unable to complete compilation check: ${error.message}`
+        });
+      }
     } catch (error) {
       console.error("Generation failed", error);
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.loading
-            ? { role: "assistant", content: `Something went wrong: ${error.message}` }
-            : message
-        )
-      );
+      resolveLoadingMessage({
+        content: `Something went wrong: ${error.message}`
+      });
     } finally {
       setIsGenerating(false);
     }
-  }, [appendMessage, input, projectId, isGenerating, memory, selectedModel]);
+  }, [
+    appendMessage,
+    input,
+    projectId,
+    isGenerating,
+    memory,
+    selectedModel,
+    resolveLoadingMessage,
+    formatCompilationErrors,
+    attemptAutoFix
+  ]);
 
   const handleSaveMemory = async () => {
     if (!projectId) return;
@@ -270,6 +479,85 @@ export default function AIAssistant({ projectId }) {
             </ul>
           </div>
         )}
+
+        <div className="border border-white/40 rounded-xl p-3 bg-white/40">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-800 mb-2">
+            <FileSearch className="w-4 h-4" /> Project search
+          </div>
+          <form onSubmit={handleSearchSubmit} className="flex gap-2 mb-2">
+            <Input
+              value={searchQuery}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setSearchStatus(null);
+              }}
+              placeholder={projectId ? "Search project files" : "Open a project to search"}
+              className="bg-white/60 border-white/50 text-sm"
+              disabled={!projectId || isSearching}
+            />
+            <Button
+              type="submit"
+              size="sm"
+              className="bg-purple-600 hover:bg-purple-700 text-white"
+              disabled={!projectId || isSearching || !searchQuery.trim()}
+            >
+              {isSearching ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Searching
+                </>
+              ) : (
+                <>
+                  <Search className="w-4 h-4 mr-2" />
+                  Search
+                </>
+              )}
+            </Button>
+          </form>
+          {searchStatus && (
+            <p
+              className={cn(
+                "text-xs mb-2",
+                searchStatus.type === "error" ? "text-red-600" : "text-gray-600"
+              )}
+            >
+              {searchStatus.message}
+            </p>
+          )}
+          <div className="max-h-40 overflow-y-auto space-y-2">
+            {searchResults.length === 0 && !isSearching ? (
+              <p className="text-xs text-gray-600">
+                {projectId
+                  ? "Enter a keyword to quickly find relevant code snippets."
+                  : "Project search is available once a project is open."}
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {searchResults.map((result, index) => (
+                  <li key={`${result.path}-${result.line}-${index}`}>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSearchResult(result)}
+                      className="w-full text-left bg-white/60 hover:bg-white/80 border border-white/60 rounded-lg px-3 py-2 transition"
+                    >
+                      <div className="flex items-center justify-between text-xs font-semibold text-gray-800">
+                        <span className="truncate">{result.path}</span>
+                        {result.line && (
+                          <span className="ml-2 text-gray-600">Line {result.line}</span>
+                        )}
+                      </div>
+                      {result.snippet && (
+                        <pre className="mt-1 text-[11px] text-gray-700 whitespace-pre-wrap font-mono leading-4">
+                          {result.snippet}
+                        </pre>
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

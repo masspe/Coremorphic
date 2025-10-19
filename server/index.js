@@ -27,6 +27,91 @@ const PREVIEW_ENTRY_CANDIDATES = [
 
 const normaliseStoredPath = (value) => value.replace(/^\.\//, "").replace(/^\//, "");
 
+const summariseProjectFiles = (files) =>
+  files
+    .map((file) => {
+      const normalizedPath = normaliseStoredPath(file.path);
+      const hash = crypto
+        .createHash("sha256")
+        .update(file.content ?? "")
+        .digest("hex")
+        .slice(0, 12);
+      const length = (file.content ?? "").length;
+      return `- ${normalizedPath} (${length} chars, sha256:${hash})`;
+    })
+    .join("\n");
+
+const buildFileMap = (files) => {
+  const fileMap = new Map();
+  files.forEach((file) => {
+    fileMap.set(normaliseStoredPath(file.path), file.content ?? "");
+  });
+  return fileMap;
+};
+
+const ensureEntryPoint = (fileMap) => {
+  const entryPath = PREVIEW_ENTRY_CANDIDATES.find((candidate) => fileMap.has(candidate));
+  if (!entryPath) {
+    throw new Error("Preview requires src/main.tsx (or src/App.tsx) to exist in the project files.");
+  }
+  return entryPath;
+};
+
+const compileProject = async (projectId) => {
+  const storedFiles = db.listFiles(projectId);
+  if (!storedFiles.length) {
+    return { ok: false, message: "Project has no files to compile.", errors: [] };
+  }
+
+  const fileMap = buildFileMap(storedFiles);
+
+  let entryPath;
+  try {
+    entryPath = ensureEntryPoint(fileMap);
+  } catch (error) {
+    return { ok: false, message: error.message || String(error), errors: [] };
+  }
+
+  try {
+    await esbuild.build({
+      entryPoints: [entryPath],
+      bundle: true,
+      write: false,
+      platform: "browser",
+      format: "iife",
+      jsx: "automatic",
+      target: ["es2018"],
+      sourcemap: false,
+      absWorkingDir: "/",
+      plugins: [createVirtualPlugin(fileMap)],
+      loader: { ".svg": "text" },
+      logLevel: "silent"
+    });
+
+    return { ok: true };
+  } catch (error) {
+    const buildErrors = Array.isArray(error.errors)
+      ? error.errors.map((item) => ({
+          text: item.text,
+          location: item.location
+            ? {
+                file: normaliseStoredPath(item.location.file || ""),
+                line: item.location.line ?? null,
+                column: item.location.column ?? null,
+                lineText: item.location.lineText ?? ""
+              }
+            : null
+        }))
+      : [];
+
+    return {
+      ok: false,
+      message: error.message || "Build failed",
+      errors: buildErrors
+    };
+  }
+};
+
 const createVirtualPlugin = (fileMap) => ({
   name: "virtual-project-files",
   setup(build) {
@@ -123,15 +208,8 @@ const buildPreviewHtml = async (projectId) => {
     throw new Error("Project has no files to preview");
   }
 
-  const fileMap = new Map();
-  storedFiles.forEach((file) => {
-    fileMap.set(normaliseStoredPath(file.path), file.content ?? "");
-  });
-
-  const entryPath = PREVIEW_ENTRY_CANDIDATES.find((candidate) => fileMap.has(candidate));
-  if (!entryPath) {
-    throw new Error("Preview requires src/main.tsx (or src/App.tsx) to exist in the project files.");
-  }
+  const fileMap = buildFileMap(storedFiles);
+  const entryPath = ensureEntryPoint(fileMap);
 
   const result = await esbuild.build({
     entryPoints: [entryPath],
@@ -208,6 +286,32 @@ const GenerateSchema = z.object({
   model: z.string().optional()
 });
 
+const SearchSchema = z.object({
+  query: z.string().min(1),
+  limit: z.number().int().min(1).max(50).optional(),
+  caseSensitive: z.boolean().optional()
+});
+
+const AutoFixSchema = z.object({
+  errors: z
+    .array(
+      z.object({
+        text: z.string(),
+        location: z
+          .object({
+            file: z.string().optional(),
+            line: z.number().optional(),
+            column: z.number().optional(),
+            lineText: z.string().optional()
+          })
+          .optional()
+      })
+    )
+    .min(1),
+  prompt: z.string().optional(),
+  model: z.string().optional()
+});
+
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 app.get("/api/projects", (_req, res) => {
@@ -240,6 +344,152 @@ app.post("/api/projects/:projectId/files", (req, res) => {
   if (!path) return res.status(400).json({ error: "path required" });
   db.upsertFile(req.params.projectId, path, String(content ?? ""));
   res.json({ ok: true });
+});
+
+app.post("/api/projects/:projectId/search", (req, res) => {
+  const parsed = SearchSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const { query, limit = 20, caseSensitive = false } = parsed.data;
+  const files = db.listFiles(req.params.projectId);
+  const normalizedQuery = caseSensitive ? query : query.toLowerCase();
+  const results = [];
+
+  outer: for (const file of files) {
+    const content = file.content ?? "";
+    const lines = content.split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const lineText = lines[index];
+      const haystack = caseSensitive ? lineText : lineText.toLowerCase();
+      const position = haystack.indexOf(normalizedQuery);
+      if (position === -1) continue;
+
+      const start = Math.max(0, index - 2);
+      const end = Math.min(lines.length, index + 3);
+
+      results.push({
+        path: normaliseStoredPath(file.path),
+        line: index + 1,
+        column: position + 1,
+        snippet: lines.slice(start, end).join("\n")
+      });
+
+      if (results.length >= limit) {
+        break outer;
+      }
+    }
+  }
+
+  res.json({ ok: true, results });
+});
+
+app.post("/api/projects/:projectId/compile", async (req, res) => {
+  try {
+    const result = await compileProject(req.params.projectId);
+    res.json(result);
+  } catch (error) {
+    console.error("Compilation check failed", error);
+    res.status(500).json({ ok: false, message: error.message || String(error), errors: [] });
+  }
+});
+
+app.post("/api/projects/:projectId/autofix", async (req, res) => {
+  const parsed = AutoFixSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const { errors, prompt, model } = parsed.data;
+  const projectId = req.params.projectId;
+  const projectFiles = db.listFiles(projectId);
+  const memory = db.getMemory(projectId)?.content || "";
+
+  const memorySection = memory && memory.trim() ? memory : "(empty)";
+  const fileSummary = summariseProjectFiles(projectFiles);
+  const filesSection = fileSummary || "- (no files yet)";
+
+  const errorSummary = errors
+    .map((error, index) => {
+      const parts = [`${index + 1}. ${error.text}`];
+      const location = error.location ?? {};
+      if (location.file) parts.push(`File: ${normaliseStoredPath(location.file)}`);
+      if (typeof location.line === "number") parts.push(`Line: ${location.line}`);
+      if (typeof location.column === "number") parts.push(`Column: ${location.column}`);
+      if (location.lineText) parts.push(`Source: ${location.lineText}`);
+      return parts.join("\n");
+    })
+    .join("\n\n");
+
+  const relevantFiles = new Map();
+  errors.forEach((error) => {
+    const location = error.location;
+    if (!location?.file) return;
+    const normalized = normaliseStoredPath(location.file);
+    if (relevantFiles.has(normalized)) return;
+    const match = projectFiles.find((file) => normaliseStoredPath(file.path) === normalized);
+    if (match) {
+      relevantFiles.set(normalized, match.content ?? "");
+    }
+  });
+
+  if (!relevantFiles.size) {
+    projectFiles.slice(0, 3).forEach((file) => {
+      const normalized = normaliseStoredPath(file.path);
+      if (!relevantFiles.has(normalized)) {
+        relevantFiles.set(normalized, file.content ?? "");
+      }
+    });
+  }
+
+  const relevantSection = relevantFiles.size
+    ? [...relevantFiles.entries()]
+        .map(([path, content]) => `Path: ${path}\n${content}`)
+        .join("\n\n---\n\n")
+    : "(No relevant files detected. If needed, inspect project files manually.)";
+
+  const systemMessage = `You are a senior full-stack engineer. Given compile/test errors, output a JSON object with this exact shape:
+{
+  "files": { "<path>": "<string content>", "...": "..." },
+  "notes": "<short rationale>",
+  "startFile": "index.html" | "src/App.tsx" | "src/main.tsx"
+}
+Rules:
+- Modify only the files necessary to fix the provided errors.
+- Preserve existing project structure and conventions.
+- Ensure the project compiles after applying the changes.
+- Output only valid JSON. No markdown fences.`;
+
+  const developerMessage = `Project memory/context (may include constraints or prior choices):\n${memorySection}\n\nCurrent project files:\n${filesSection}\n\nOriginal prompt (if available):\n${prompt ?? "(none)"}`;
+
+  const userMessage = `Compilation errors to fix:\n${errorSummary}\n\nRelevant file contents:\n${relevantSection}\n\nReturn the updated files as JSON following the specified shape.`;
+
+  try {
+    const json = await openai.generateJson(
+      model || process.env.OPENAI_MODEL || "gpt-4o-mini",
+      systemMessage,
+      developerMessage,
+      userMessage
+    );
+
+    if (!json || !json.files || typeof json.files !== "object") {
+      throw new Error("Model returned invalid JSON shape.");
+    }
+
+    db.addMessage(projectId, "developer", `Autofix errors provided to model:\n${errorSummary}`);
+    db.addMessage(projectId, "assistant", JSON.stringify(json));
+
+    Object.entries(json.files).forEach(([filePath, fileContent]) => {
+      db.upsertFile(projectId, filePath, String(fileContent));
+    });
+
+    res.json({ ok: true, result: json });
+  } catch (error) {
+    console.error("Automatic fix failed", error);
+    res.status(500).json({ error: String(error) });
+  }
 });
 
 app.get("/api/projects/:projectId/preview", async (req, res) => {
@@ -276,18 +526,7 @@ Rules:
 Output only valid JSON. No markdown fences.`;
 
   const projectFiles = db.listFiles(projectId);
-  const fileSummary = projectFiles
-    .map((file) => {
-      const normalizedPath = normaliseStoredPath(file.path);
-      const hash = crypto
-        .createHash("sha256")
-        .update(file.content ?? "")
-        .digest("hex")
-        .slice(0, 12);
-      const length = (file.content ?? "").length;
-      return `- ${normalizedPath} (${length} chars, sha256:${hash})`;
-    })
-    .join("\n");
+  const fileSummary = summariseProjectFiles(projectFiles);
 
   const memorySection = memory && memory.trim() ? memory : "(empty)";
   const filesSection = fileSummary || "- (no files yet)";
