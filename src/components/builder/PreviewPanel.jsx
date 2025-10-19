@@ -23,6 +23,7 @@ import {
   buildSandpackFiles,
   normalizeSandpackPath
 } from "./previewSandpackUtils";
+import { normalizePreviewDependencies } from "./normalizePreviewDependencies";
 
 const deviceSizes = {
   desktop: "w-full h-full",
@@ -119,9 +120,17 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
 
   const sandpackConfig = useMemo(() => buildSandpackConfig(files), [files]);
 
+  const normalizedSandpackConfig = useMemo(() => {
+    if (!sandpackConfig) return sandpackConfig;
+    return {
+      ...sandpackConfig,
+      dependencies: normalizePreviewDependencies(sandpackConfig)
+    };
+  }, [sandpackConfig]);
+
   const sandpackFiles = useMemo(
-    () => buildSandpackFiles(files, activeFilePath, sandpackConfig),
-    [files, activeFilePath, sandpackConfig]
+    () => buildSandpackFiles(files, activeFilePath, normalizedSandpackConfig),
+    [files, activeFilePath, normalizedSandpackConfig]
   );
 
   const handleRuntimeErrorChange = useCallback((message) => {
@@ -237,7 +246,7 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
             <div className="relative h-full">
               <SandpackProvider
                 key={refreshKey}
-                template={sandpackConfig.template}
+                template={normalizedSandpackConfig.template}
                 files={sandpackFiles}
                 options={{
                   autorun: true,
@@ -246,8 +255,8 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
                   externalResources: []
                 }}
                 customSetup={{
-                  dependencies: sandpackConfig.dependencies,
-                  entry: sandpackConfig.bundlerEntry
+                  dependencies: normalizedSandpackConfig.dependencies,
+                  entry: normalizedSandpackConfig.bundlerEntry
                 }}
               >
                 <div className="h-full">
