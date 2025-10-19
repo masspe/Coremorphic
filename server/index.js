@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import bodyParser from "body-parser";
-import { ClerkExpressWithAuth, clerkClient, requireSession } from "@clerk/express";
 import { z } from "zod";
 import path from "path";
 import esbuild from "esbuild";
@@ -21,13 +20,51 @@ const clerkPublishableKey = process.env.CLERK_PUBLISHABLE_KEY;
 const clerkSecretKey = process.env.CLERK_SECRET_KEY;
 const isClerkConfigured = Boolean(clerkPublishableKey && clerkSecretKey);
 
+let ClerkExpress = {};
+try {
+  ClerkExpress = await import("@clerk/express");
+} catch (error) {
+  console.warn("Failed to load @clerk/express. Clerk integration will be disabled.", error);
+}
+
+const createWithAuthMiddleware =
+  typeof ClerkExpress.ClerkExpressWithAuth === "function"
+    ? ClerkExpress.ClerkExpressWithAuth
+    : typeof ClerkExpress.clerkMiddleware === "function"
+      ? () => ClerkExpress.clerkMiddleware()
+      : undefined;
+
+const createRequireSession =
+  typeof ClerkExpress.requireSession === "function"
+    ? ClerkExpress.requireSession
+    : typeof ClerkExpress.requireAuth === "function"
+      ? ClerkExpress.requireAuth
+      : typeof ClerkExpress.ClerkExpressRequireAuth === "function"
+        ? ClerkExpress.ClerkExpressRequireAuth
+        : undefined;
+
+const clerkClient =
+  ClerkExpress.clerkClient ??
+  (typeof ClerkExpress.createClerkClient === "function" && isClerkConfigured
+    ? ClerkExpress.createClerkClient({
+        secretKey: clerkSecretKey,
+        publishableKey: clerkPublishableKey
+      })
+    : undefined);
+
 if (isClerkConfigured) {
-  app.use(
-    ClerkExpressWithAuth({
-      publishableKey: clerkPublishableKey,
-      secretKey: clerkSecretKey
-    })
-  );
+  if (createWithAuthMiddleware) {
+    app.use(
+      createWithAuthMiddleware({
+        publishableKey: clerkPublishableKey,
+        secretKey: clerkSecretKey
+      })
+    );
+  } else {
+    console.warn(
+      "Clerk middleware is unavailable. Authentication-sensitive endpoints will be disabled."
+    );
+  }
 } else {
   console.warn("Clerk keys are not configured. Authentication-sensitive endpoints will be disabled.");
 }
@@ -36,8 +73,10 @@ let ensureClerkSession = (_req, res, next) => {
   res.status(500).json({ error: "Clerk is not configured" });
 };
 
-if (isClerkConfigured) {
-  ensureClerkSession = requireSession();
+if (isClerkConfigured && createRequireSession) {
+  ensureClerkSession = createRequireSession();
+} else if (isClerkConfigured) {
+  console.warn("Clerk session middleware is unavailable. Authentication-sensitive endpoints will be disabled.");
 }
 
 app.use(cors());
@@ -584,19 +623,21 @@ app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
   let displayName = "Collaborator";
   let avatarUrl = null;
 
-  try {
-    const clerkUser = await clerkClient.users.getUser(userId);
-    if (clerkUser) {
-      displayName =
-        clerkUser.fullName ||
-        clerkUser.username ||
-        clerkUser.primaryEmailAddress?.emailAddress ||
-        clerkUser.id ||
-        displayName;
-      avatarUrl = clerkUser.imageUrl || null;
+  if (clerkClient?.users?.getUser) {
+    try {
+      const clerkUser = await clerkClient.users.getUser(userId);
+      if (clerkUser) {
+        displayName =
+          clerkUser.fullName ||
+          clerkUser.username ||
+          clerkUser.primaryEmailAddress?.emailAddress ||
+          clerkUser.id ||
+          displayName;
+        avatarUrl = clerkUser.imageUrl || null;
+      }
+    } catch (error) {
+      console.warn("Failed to fetch Clerk user profile", error);
     }
-  } catch (error) {
-    console.warn("Failed to fetch Clerk user profile", error);
   }
 
   try {
