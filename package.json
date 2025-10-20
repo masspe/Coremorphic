@@ -22,6 +22,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "body-parser": "^1.20.3",
+    "better-sqlite3": "^11.8.1",
     "esbuild": "^0.24.2",
     "@hookform/resolvers": "^4.1.2",
     "@radix-ui/react-accordion": "^1.2.3",

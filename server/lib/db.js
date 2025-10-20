@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import DatabaseConstructor from "better-sqlite3";
 
 const METADATA_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS projects (
@@ -25,38 +24,12 @@ const METADATA_SCHEMA = [
 ];
 
 const responseCache = new WeakMap();
-const execFileAsync = promisify(execFile);
-const SQLITE_PRAGMA = "PRAGMA foreign_keys = ON;";
+const SQLITE_PRAGMA = "foreign_keys = ON";
 
 const appendSemicolon = (statement) => {
   const trimmed = statement.trim();
   if (!trimmed) return "";
   return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
-};
-
-const normaliseStatements = (statements) => {
-  const parts = Array.isArray(statements) ? statements : [statements];
-  return parts.map((part) => appendSemicolon(part)).filter(Boolean).join(" ");
-};
-
-const escapeSqlValue = (value) => {
-  if (value === null || value === undefined) return "NULL";
-  if (typeof value === "number" || typeof value === "bigint") return String(value);
-  if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
-  return `'${String(value).replace(/'/g, "''")}'`;
-};
-
-const bindSqlParameters = (sql, params = []) => {
-  if (!params.length) return sql;
-
-  let positionalIndex = 0;
-  return sql.replace(/\?(\d+)?/g, (match, explicitIndex) => {
-    const index = explicitIndex ? Number(explicitIndex) - 1 : positionalIndex++;
-    if (!Number.isInteger(index) || index < 0 || index >= params.length) {
-      throw new Error(`Missing parameter for placeholder ${match}`);
-    }
-    return escapeSqlValue(params[index]);
-  });
 };
 
 const toHex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -113,6 +86,7 @@ const ensureJson = async (response) => {
 class SqliteMetadataStore {
   #dbPath;
   #initialisePromise;
+  #db;
 
   constructor(databasePath) {
     if (!databasePath) {
@@ -121,6 +95,10 @@ class SqliteMetadataStore {
     this.#dbPath = path.resolve(databasePath);
     this.#initialisePromise = fs.promises
       .mkdir(path.dirname(this.#dbPath), { recursive: true })
+      .then(() => {
+        this.#db = new DatabaseConstructor(this.#dbPath);
+        this.#db.pragma(SQLITE_PRAGMA);
+      })
       .catch(() => {});
   }
 
@@ -129,39 +107,31 @@ class SqliteMetadataStore {
       await this.#initialisePromise;
       this.#initialisePromise = null;
     }
+    if (!this.#db) {
+      this.#db = new DatabaseConstructor(this.#dbPath);
+      this.#db.pragma(SQLITE_PRAGMA);
+    }
+    return this.#db;
   }
 
-  async #run(statements, { expectResult = false } = {}) {
-    await this.#ensureReady();
-    const payload = normaliseStatements(statements);
-    if (!payload) return expectResult ? [] : undefined;
-    const query = `${SQLITE_PRAGMA} ${payload}`;
-    const args = expectResult ? ["-json", this.#dbPath, query] : [this.#dbPath, query];
-
-    try {
-      const { stdout } = await execFileAsync("sqlite3", args);
-      if (!expectResult) return undefined;
-      const trimmed = stdout.trim();
-      if (!trimmed) return [];
-      try {
-        return JSON.parse(trimmed);
-      } catch (error) {
-        throw new Error(`Failed to parse SQLite response: ${error?.message || error}`);
-      }
-    } catch (error) {
-      const stderr = error?.stderr?.trim?.() || error?.message || String(error);
-      throw new Error(`SQLite command failed: ${stderr}`);
+  async #run(statements) {
+    const db = await this.#ensureReady();
+    const parts = Array.isArray(statements) ? statements : [statements];
+    for (const statement of parts) {
+      const trimmed = appendSemicolon(statement);
+      if (!trimmed) continue;
+      db.exec(trimmed);
     }
   }
 
   async #execute(sql, params = []) {
-    const bound = bindSqlParameters(sql, params);
-    await this.#run(bound);
+    const db = await this.#ensureReady();
+    db.prepare(sql).run(...params);
   }
 
   async #query(sql, params = []) {
-    const bound = bindSqlParameters(sql, params);
-    return this.#run(bound, { expectResult: true });
+    const db = await this.#ensureReady();
+    return db.prepare(sql).all(...params);
   }
 
   async ensureSchema() {
