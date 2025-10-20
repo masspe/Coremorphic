@@ -10,7 +10,7 @@ import { createServer } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { Liveblocks } from "@liveblocks/node";
 import { MetadataServiceClient } from "./lib/db.js";
-import { StorageServiceClient } from "./lib/storage.js";
+import { LocalProjectStorage, StorageServiceClient } from "./lib/storage.js";
 import { WorkersAIClient } from "./lib/workersAi.js";
 import { SandboxManager } from "./sandbox/orchestrator.js";
 
@@ -97,11 +97,22 @@ const metadata = new MetadataServiceClient({
   token: serviceToken || undefined
 });
 
-const storage = new StorageServiceClient({
-  serviceBinding: storageBinding,
-  baseUrl: process.env.STORAGE_SERVICE_URL,
-  token: serviceToken || undefined
-});
+let storage;
+const shouldUseLocalStorage =
+  Boolean(process.env.LOCAL_STORAGE_DIR) || (!storageBinding && !process.env.STORAGE_SERVICE_URL);
+
+if (shouldUseLocalStorage) {
+  storage = new LocalProjectStorage({ rootDir: process.env.LOCAL_STORAGE_DIR || undefined });
+  storage
+    .bootstrap()
+    .catch((error) => console.error("Failed to bootstrap local project storage", error));
+} else {
+  storage = new StorageServiceClient({
+    serviceBinding: storageBinding,
+    baseUrl: process.env.STORAGE_SERVICE_URL,
+    token: serviceToken || undefined
+  });
+}
 const aiBinding =
   typeof WORKERS_AI !== "undefined" ? WORKERS_AI : typeof AI !== "undefined" ? AI : undefined;
 const workersAi = new WorkersAIClient({ binding: aiBinding });

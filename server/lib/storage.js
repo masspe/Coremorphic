@@ -1,4 +1,8 @@
-const normalisePath = (value) => value.replace(/^\.\/+/, "").replace(/^\/+/, "");
+const normalisePath = (value) =>
+  String(value ?? "")
+    .replace(/\\+/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/^\/+/, "");
 
 const buildKey = (projectId, path) => {
   const safeProject = projectId.trim();
@@ -65,6 +69,126 @@ export class R2StorageBinding {
     });
     const updatedAt = putResult?.uploaded instanceof Date ? putResult.uploaded.toISOString() : new Date().toISOString();
     return { path: normalisePath(path), updated_at: updatedAt };
+  }
+}
+
+const nodeModules = {
+  promise: null,
+  async load() {
+    if (this.promise) return this.promise;
+    if (typeof process === "undefined" || !process.versions?.node) {
+      throw new Error("LocalProjectStorage requires a Node.js environment");
+    }
+    this.promise = Promise.all([
+      import("node:fs/promises"),
+      import("node:path")
+    ]).then(([fsModule, pathModule]) => ({
+      fs: fsModule,
+      path: pathModule.default ?? pathModule
+    }));
+    return this.promise;
+  }
+};
+
+const sanitizeIdentifier = (value) =>
+  value
+    .toString()
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, "-");
+
+export class LocalProjectStorage {
+  #rootDir;
+  #initialised;
+  #path;
+  #fs;
+
+  constructor({ rootDir } = {}) {
+    this.#rootDir = rootDir || null;
+    this.#initialised = false;
+    this.#path = null;
+    this.#fs = null;
+  }
+
+  async #ensureInitialised() {
+    if (this.#initialised) return;
+    const { fs, path } = await nodeModules.load();
+    const resolvedRoot = this.#rootDir
+      ? path.resolve(this.#rootDir)
+      : path.join(process.cwd(), "local-storage");
+    await fs.mkdir(resolvedRoot, { recursive: true });
+    this.#rootDir = resolvedRoot;
+    this.#initialised = true;
+    this.#path = path;
+    this.#fs = fs;
+  }
+
+  async bootstrap() {
+    await this.#ensureInitialised();
+  }
+
+  async #projectDir(projectId, { create } = { create: false }) {
+    await this.#ensureInitialised();
+    const safeProject = sanitizeIdentifier(projectId);
+    if (!safeProject) {
+      throw new Error("projectId is required for storage operations");
+    }
+    const projectDir = this.#path.join(this.#rootDir, safeProject);
+    if (create) {
+      await this.#fs.mkdir(projectDir, { recursive: true });
+    }
+    return projectDir;
+  }
+
+  async listProjectFiles(projectId) {
+    const projectDir = await this.#projectDir(projectId, { create: false });
+    const files = [];
+    try {
+      const walk = async (dir, relativeBase = "") => {
+        const dirEntries = await this.#fs.readdir(dir, { withFileTypes: true });
+        for (const entry of dirEntries) {
+          const entryPath = this.#path.join(dir, entry.name);
+          const nextRelative = relativeBase ? `${relativeBase}/${entry.name}` : entry.name;
+          if (entry.isDirectory()) {
+            await walk(entryPath, nextRelative);
+          } else if (entry.isFile()) {
+            const content = await this.#fs.readFile(entryPath, "utf-8");
+            const stats = await this.#fs.stat(entryPath);
+            files.push({
+              path: normalisePath(nextRelative),
+              content,
+              updated_at: stats.mtime.toISOString()
+            });
+          }
+        }
+      };
+      await walk(projectDir);
+    } catch (error) {
+      if (error && error.code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    return files;
+  }
+
+  async upsertFile(projectId, path, content) {
+    const projectDir = await this.#projectDir(projectId, { create: true });
+    const relativePath = normalisePath(path);
+    if (!relativePath) {
+      throw new Error("path is required for storage operations");
+    }
+    if (relativePath.split("/").some((segment) => segment === "..")) {
+      throw new Error("path cannot contain parent directory traversal");
+    }
+    const absolutePath = this.#path.join(projectDir, relativePath);
+    if (!absolutePath.startsWith(projectDir)) {
+      throw new Error("Invalid file path");
+    }
+    const parentDir = this.#path.dirname(absolutePath);
+    await this.#fs.mkdir(parentDir, { recursive: true });
+    await this.#fs.writeFile(absolutePath, String(content ?? ""), "utf-8");
+    const stats = await this.#fs.stat(absolutePath);
+    return { path: relativePath, updated_at: stats.mtime.toISOString() };
   }
 }
 
