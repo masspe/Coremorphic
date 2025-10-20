@@ -19,6 +19,24 @@ Coremorphic combines a Vite + React front-end with a Node.js backend that orches
    npm install
    ```
 
+1. **Create your Cloudflare account**
+   - Go to [dash.cloudflare.com/sign-up](https://dash.cloudflare.com/sign-up) and register using an email address you control.
+   - Confirm the verification email and sign in to the Cloudflare dashboard.
+   - From the top navigation, switch to the account that will host your Workers (if you just created an account, there will be a single default account).
+
+1. **Create a Workers project**
+   - In the dashboard, open **Workers & Pages** and click **Create application** ▸ **Create Worker**.
+   - Choose a descriptive name such as `coremorphic-metadata` and accept the default “HTTP handler” template.
+   - Press **Deploy** to publish the Worker, then click **Continue to dashboard**.
+   - Repeat for a second Worker named `coremorphic-storage` if you plan to split metadata and storage services as recommended below.
+
+1. **Configure bindings for the Workers**
+   For each Worker (`coremorphic-metadata`, `coremorphic-storage`):
+   - Open the Worker in the dashboard and select the **Settings** ▸ **Bindings** tab.
+   - Under **D1 Databases**, add a binding named `COREMORPHIC_D1` (or `DB` / `METADATA_DB`) pointing to an existing D1 database that will store metadata. If you do not yet have a database, create one from the D1 section of the dashboard first.
+   - Under **R2 Buckets**, add a binding named `COREMORPHIC_R2` (or `STORAGE_BUCKET`) pointing to the bucket that will hold project files. Create the bucket from the R2 section before attaching it.
+   - Save the bindings. The deployed Worker will now expose the required environment for the server in this repository.
+
 2. **Prepare metadata and storage services**
    - Deploy the Cloudflare Workers in `server/workers/` (or run them locally with `wrangler dev`).
    - Ensure the metadata worker has a D1 binding named `COREMORPHIC_D1` (or `DB`/`METADATA_DB`).
