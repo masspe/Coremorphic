@@ -1,3 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 const METADATA_SCHEMA = [
   `CREATE TABLE IF NOT EXISTS projects (
     id TEXT PRIMARY KEY,
@@ -20,6 +25,39 @@ const METADATA_SCHEMA = [
 ];
 
 const responseCache = new WeakMap();
+const execFileAsync = promisify(execFile);
+const SQLITE_PRAGMA = "PRAGMA foreign_keys = ON;";
+
+const appendSemicolon = (statement) => {
+  const trimmed = statement.trim();
+  if (!trimmed) return "";
+  return trimmed.endsWith(";") ? trimmed : `${trimmed};`;
+};
+
+const normaliseStatements = (statements) => {
+  const parts = Array.isArray(statements) ? statements : [statements];
+  return parts.map((part) => appendSemicolon(part)).filter(Boolean).join(" ");
+};
+
+const escapeSqlValue = (value) => {
+  if (value === null || value === undefined) return "NULL";
+  if (typeof value === "number" || typeof value === "bigint") return String(value);
+  if (value instanceof Date) return `'${value.toISOString().replace(/'/g, "''")}'`;
+  return `'${String(value).replace(/'/g, "''")}'`;
+};
+
+const bindSqlParameters = (sql, params = []) => {
+  if (!params.length) return sql;
+
+  let positionalIndex = 0;
+  return sql.replace(/\?(\d+)?/g, (match, explicitIndex) => {
+    const index = explicitIndex ? Number(explicitIndex) - 1 : positionalIndex++;
+    if (!Number.isInteger(index) || index < 0 || index >= params.length) {
+      throw new Error(`Missing parameter for placeholder ${match}`);
+    }
+    return escapeSqlValue(params[index]);
+  });
+};
 
 const toHex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -71,6 +109,109 @@ const ensureJson = async (response) => {
   responseCache.set(response, parsed);
   return parsed;
 };
+
+class SqliteMetadataStore {
+  #dbPath;
+  #initialisePromise;
+
+  constructor(databasePath) {
+    if (!databasePath) {
+      throw new Error("SqliteMetadataStore requires a database path");
+    }
+    this.#dbPath = path.resolve(databasePath);
+    this.#initialisePromise = fs.promises
+      .mkdir(path.dirname(this.#dbPath), { recursive: true })
+      .catch(() => {});
+  }
+
+  async #ensureReady() {
+    if (this.#initialisePromise) {
+      await this.#initialisePromise;
+      this.#initialisePromise = null;
+    }
+  }
+
+  async #run(statements, { expectResult = false } = {}) {
+    await this.#ensureReady();
+    const payload = normaliseStatements(statements);
+    if (!payload) return expectResult ? [] : undefined;
+    const query = `${SQLITE_PRAGMA} ${payload}`;
+    const args = expectResult ? ["-json", this.#dbPath, query] : [this.#dbPath, query];
+
+    try {
+      const { stdout } = await execFileAsync("sqlite3", args);
+      if (!expectResult) return undefined;
+      const trimmed = stdout.trim();
+      if (!trimmed) return [];
+      try {
+        return JSON.parse(trimmed);
+      } catch (error) {
+        throw new Error(`Failed to parse SQLite response: ${error?.message || error}`);
+      }
+    } catch (error) {
+      const stderr = error?.stderr?.trim?.() || error?.message || String(error);
+      throw new Error(`SQLite command failed: ${stderr}`);
+    }
+  }
+
+  async #execute(sql, params = []) {
+    const bound = bindSqlParameters(sql, params);
+    await this.#run(bound);
+  }
+
+  async #query(sql, params = []) {
+    const bound = bindSqlParameters(sql, params);
+    return this.#run(bound, { expectResult: true });
+  }
+
+  async ensureSchema() {
+    await this.#run(METADATA_SCHEMA);
+  }
+
+  async listProjects() {
+    return this.#query("SELECT id, name, created_at FROM projects ORDER BY created_at DESC");
+  }
+
+  async createProject(name) {
+    const id = randomId();
+    const createdAt = new Date().toISOString();
+    await this.#execute("INSERT INTO projects (id, name, created_at) VALUES (?1, ?2, ?3)", [id, name, createdAt]);
+    return { id, name, created_at: createdAt };
+  }
+
+  async getProject(projectId) {
+    const rows = await this.#query("SELECT id, name, created_at FROM projects WHERE id = ?1", [projectId]);
+    return rows?.[0] ?? null;
+  }
+
+  async addMessage(projectId, role, content) {
+    await this.#execute(
+      "INSERT INTO messages (project_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
+      [projectId, role, content, new Date().toISOString()]
+    );
+  }
+
+  async getMessages(projectId) {
+    return this.#query(
+      "SELECT role, content, created_at FROM messages WHERE project_id = ?1 ORDER BY id ASC",
+      [projectId]
+    );
+  }
+
+  async getMemory(projectId) {
+    const rows = await this.#query("SELECT project_id, content FROM memory WHERE project_id = ?1", [projectId]);
+    if (rows?.[0]) return rows[0];
+    return { project_id: projectId, content: "" };
+  }
+
+  async setMemory(projectId, content) {
+    await this.#execute(
+      "INSERT INTO memory (project_id, content) VALUES (?1, ?2) ON CONFLICT(project_id) DO UPDATE SET content = excluded.content",
+      [projectId, content]
+    );
+    return { project_id: projectId, content };
+  }
+}
 
 export class D1MetadataStore {
   #d1;
@@ -178,20 +319,39 @@ export class MetadataServiceClient {
   #serviceBinding;
   #baseUrl;
   #token;
+  #store;
+  #storeReadyPromise;
 
   constructor({ serviceBinding, baseUrl, token } = {}) {
-    if (!serviceBinding && !baseUrl) {
-      throw new Error(
-        "MetadataServiceClient requires either a service binding or a METADATA_SERVICE_URL"
-      );
-    }
-
     this.#serviceBinding = serviceBinding ?? null;
     this.#baseUrl = baseUrl ? baseUrl.replace(/\/$/, "") : null;
     this.#token = token || null;
+
+    if (!this.#serviceBinding && !this.#baseUrl) {
+      const databasePath =
+        process.env.METADATA_SQLITE_PATH || path.join(process.cwd(), "data", "metadata.sqlite");
+      this.#store = new SqliteMetadataStore(databasePath);
+      this.#storeReadyPromise = this.#store.ensureSchema();
+    } else {
+      this.#store = null;
+      this.#storeReadyPromise = null;
+    }
+  }
+
+  async #ensureLocalStoreReady() {
+    if (!this.#store) return null;
+    if (!this.#storeReadyPromise) {
+      this.#storeReadyPromise = this.#store.ensureSchema();
+    }
+    await this.#storeReadyPromise;
+    return this.#store;
   }
 
   async #fetch(path, init = {}) {
+    if (this.#store) {
+      throw new Error("MetadataServiceClient is configured for a local SQLite store");
+    }
+
     const target = this.#baseUrl ? applyBaseUrl(this.#baseUrl, path) : `https://metadata.internal${path}`;
     const request = buildRequest(target, init, this.#token);
     const fetcher = this.#serviceBinding?.fetch?.bind(this.#serviceBinding);
@@ -211,25 +371,47 @@ export class MetadataServiceClient {
   }
 
   async bootstrap() {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      this.#storeReadyPromise = store.ensureSchema();
+      await this.#storeReadyPromise;
+      return;
+    }
     await this.#fetch("/internal/bootstrap", { method: "POST" });
   }
 
   async listProjects() {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.listProjects();
+    }
     const payload = await this.#fetch("/projects", { method: "GET" });
     return Array.isArray(payload?.projects) ? payload.projects : normaliseResults(payload);
   }
 
   async createProject(name) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.createProject(name || "New Project");
+    }
     const payload = await this.#fetch("/projects", { method: "POST", body: { name } });
     return payload?.project ?? null;
   }
 
   async getProject(projectId) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.getProject(projectId);
+    }
     const payload = await this.#fetch(`/projects/${encodeURIComponent(projectId)}`, { method: "GET" });
     return payload?.project ?? null;
   }
 
   async getMessages(projectId) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.getMessages(projectId);
+    }
     const payload = await this.#fetch(`/projects/${encodeURIComponent(projectId)}/messages`, {
       method: "GET"
     });
@@ -237,6 +419,11 @@ export class MetadataServiceClient {
   }
 
   async addMessage(projectId, role, content) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      await store.addMessage(projectId, role, content);
+      return;
+    }
     await this.#fetch(`/projects/${encodeURIComponent(projectId)}/messages`, {
       method: "POST",
       body: { role, content }
@@ -244,6 +431,10 @@ export class MetadataServiceClient {
   }
 
   async getMemory(projectId) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.getMemory(projectId);
+    }
     const payload = await this.#fetch(`/projects/${encodeURIComponent(projectId)}/memory`, {
       method: "GET"
     });
@@ -253,6 +444,10 @@ export class MetadataServiceClient {
   }
 
   async setMemory(projectId, content) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.setMemory(projectId, content);
+    }
     const payload = await this.#fetch(`/projects/${encodeURIComponent(projectId)}/memory`, {
       method: "PUT",
       body: { content }
@@ -261,4 +456,4 @@ export class MetadataServiceClient {
   }
 }
 
-export { METADATA_SCHEMA };
+export { METADATA_SCHEMA, SqliteMetadataStore };
