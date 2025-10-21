@@ -145,38 +145,38 @@ class SqliteMetadataStore {
   async createProject(name) {
     const id = randomId();
     const createdAt = new Date().toISOString();
-    await this.#execute("INSERT INTO projects (id, name, created_at) VALUES (?1, ?2, ?3)", [id, name, createdAt]);
+    await this.#execute("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)", [id, name, createdAt]);
     return { id, name, created_at: createdAt };
   }
 
   async getProject(projectId) {
-    const rows = await this.#query("SELECT id, name, created_at FROM projects WHERE id = ?1", [projectId]);
+    const rows = await this.#query("SELECT id, name, created_at FROM projects WHERE id = ?", [projectId]);
     return rows?.[0] ?? null;
   }
 
   async addMessage(projectId, role, content) {
     await this.#execute(
-      "INSERT INTO messages (project_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
+      "INSERT INTO messages (project_id, role, content, created_at) VALUES (?, ?, ?, ?)",
       [projectId, role, content, new Date().toISOString()]
     );
   }
 
   async getMessages(projectId) {
     return this.#query(
-      "SELECT role, content, created_at FROM messages WHERE project_id = ?1 ORDER BY id ASC",
+      "SELECT role, content, created_at FROM messages WHERE project_id = ? ORDER BY id ASC",
       [projectId]
     );
   }
 
   async getMemory(projectId) {
-    const rows = await this.#query("SELECT project_id, content FROM memory WHERE project_id = ?1", [projectId]);
+    const rows = await this.#query("SELECT project_id, content FROM memory WHERE project_id = ?", [projectId]);
     if (rows?.[0]) return rows[0];
     return { project_id: projectId, content: "" };
   }
 
   async setMemory(projectId, content) {
     await this.#execute(
-      "INSERT INTO memory (project_id, content) VALUES (?1, ?2) ON CONFLICT(project_id) DO UPDATE SET content = excluded.content",
+      "INSERT INTO memory (project_id, content) VALUES (?, ?) ON CONFLICT(project_id) DO UPDATE SET content = excluded.content",
       [projectId, content]
     );
     return { project_id: projectId, content };
@@ -208,7 +208,7 @@ export class D1MetadataStore {
     const id = randomId();
     const createdAt = new Date().toISOString();
     await this.#d1
-      .prepare("INSERT INTO projects (id, name, created_at) VALUES (?1, ?2, ?3)")
+      .prepare("INSERT INTO projects (id, name, created_at) VALUES (?, ?, ?)")
       .bind(id, name, createdAt)
       .run();
     return { id, name, created_at: createdAt };
@@ -216,7 +216,7 @@ export class D1MetadataStore {
 
   async getProject(projectId) {
     const { results } = await this.#d1
-      .prepare("SELECT id, name, created_at FROM projects WHERE id = ?1")
+      .prepare("SELECT id, name, created_at FROM projects WHERE id = ?")
       .bind(projectId)
       .all();
     return results?.[0] ?? null;
@@ -224,18 +224,14 @@ export class D1MetadataStore {
 
   async addMessage(projectId, role, content) {
     await this.#d1
-      .prepare(
-        "INSERT INTO messages (project_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)"
-      )
+      .prepare("INSERT INTO messages (project_id, role, content, created_at) VALUES (?, ?, ?, ?)")
       .bind(projectId, role, content, new Date().toISOString())
       .run();
   }
 
   async getMessages(projectId) {
     const { results } = await this.#d1
-      .prepare(
-        "SELECT role, content, created_at FROM messages WHERE project_id = ?1 ORDER BY id ASC"
-      )
+      .prepare("SELECT role, content, created_at FROM messages WHERE project_id = ? ORDER BY id ASC")
       .bind(projectId)
       .all();
     return results ?? [];
@@ -243,7 +239,7 @@ export class D1MetadataStore {
 
   async getMemory(projectId) {
     const { results } = await this.#d1
-      .prepare("SELECT project_id, content FROM memory WHERE project_id = ?1")
+      .prepare("SELECT project_id, content FROM memory WHERE project_id = ?")
       .bind(projectId)
       .all();
     if (results?.[0]) {
@@ -255,7 +251,7 @@ export class D1MetadataStore {
   async setMemory(projectId, content) {
     await this.#d1
       .prepare(
-        "INSERT INTO memory (project_id, content) VALUES (?1, ?2) ON CONFLICT(project_id) DO UPDATE SET content = excluded.content"
+        "INSERT INTO memory (project_id, content) VALUES (?, ?) ON CONFLICT(project_id) DO UPDATE SET content = excluded.content"
       )
       .bind(projectId, content)
       .run();
