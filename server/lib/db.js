@@ -20,6 +20,11 @@ const METADATA_SCHEMA = [
     project_id TEXT PRIMARY KEY,
     content TEXT NOT NULL,
     FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+  )`,
+  `CREATE TABLE IF NOT EXISTS app_previews (
+    app_id TEXT PRIMARY KEY,
+    code TEXT NOT NULL,
+    updated_at TEXT NOT NULL
   )`
 ];
 
@@ -181,6 +186,20 @@ class SqliteMetadataStore {
     );
     return { project_id: projectId, content };
   }
+
+  async getAppPreview(appId) {
+    const rows = await this.#query("SELECT app_id, code, updated_at FROM app_previews WHERE app_id = ?", [appId]);
+    return rows?.[0] ?? null;
+  }
+
+  async setAppPreview(appId, code) {
+    const updatedAt = new Date().toISOString();
+    await this.#execute(
+      "INSERT INTO app_previews (app_id, code, updated_at) VALUES (?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at",
+      [appId, code, updatedAt]
+    );
+    return { app_id: appId, code, updated_at: updatedAt };
+  }
 }
 
 export class D1MetadataStore {
@@ -256,6 +275,25 @@ export class D1MetadataStore {
       .bind(projectId, content)
       .run();
     return { project_id: projectId, content };
+  }
+
+  async getAppPreview(appId) {
+    const { results } = await this.#d1
+      .prepare("SELECT app_id, code, updated_at FROM app_previews WHERE app_id = ?")
+      .bind(appId)
+      .all();
+    return results?.[0] ?? null;
+  }
+
+  async setAppPreview(appId, code) {
+    const updatedAt = new Date().toISOString();
+    await this.#d1
+      .prepare(
+        "INSERT INTO app_previews (app_id, code, updated_at) VALUES (?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET code = excluded.code, updated_at = excluded.updated_at"
+      )
+      .bind(appId, code, updatedAt)
+      .run();
+    return { app_id: appId, code, updated_at: updatedAt };
   }
 }
 
@@ -419,6 +457,29 @@ export class MetadataServiceClient {
       body: { content }
     });
     return payload?.memory ?? { project_id: projectId, content };
+  }
+
+  async getAppPreview(appId) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.getAppPreview(appId);
+    }
+    const payload = await this.#fetch(`/apps/${encodeURIComponent(appId)}/preview`, {
+      method: "GET"
+    });
+    return payload?.preview ?? null;
+  }
+
+  async setAppPreview(appId, code) {
+    const store = await this.#ensureLocalStoreReady();
+    if (store) {
+      return store.setAppPreview(appId, code);
+    }
+    const payload = await this.#fetch(`/apps/${encodeURIComponent(appId)}/preview`, {
+      method: "POST",
+      body: { code }
+    });
+    return payload?.preview ?? null;
   }
 }
 
