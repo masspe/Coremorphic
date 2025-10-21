@@ -6,7 +6,7 @@ import Sandbox from "./Sandbox";
 import NotFound from "./NotFound.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
-import { ClerkLoading, RedirectToSignIn, SignedIn, SignedOut } from '@clerk/clerk-react';
+import { ClerkLoading, RedirectToSignIn, SignedIn, SignedOut } from '@/lib/clerk';
 import { createPageUrl } from "@/utils";
 
 const PAGES = {
