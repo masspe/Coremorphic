@@ -43,6 +43,30 @@ const ensureSchema = async (store) => {
 
 const notFound = () => json({ error: "Not found" }, 404);
 
+const handleAppPreview = async (request, appId, store) => {
+  const pathname = new URL(request.url).pathname;
+
+  if (!pathname.endsWith("/preview")) {
+    return notFound();
+  }
+
+  if (request.method === "GET") {
+    const preview = await store.getAppPreview(appId);
+    return json({ preview });
+  }
+
+  if (request.method === "POST") {
+    const payload = await parseJson(request);
+    if (typeof payload.code !== "string") {
+      return json({ error: "code must be a string" }, 400);
+    }
+    const preview = await store.setAppPreview(appId, payload.code);
+    return json({ preview });
+  }
+
+  return json({ error: "Method not allowed" }, 405);
+};
+
 const handleProject = async (request, projectId, store) => {
   const pathname = new URL(request.url).pathname;
 
@@ -113,6 +137,13 @@ export default {
         const name = typeof payload.name === "string" ? payload.name.trim() : "";
         const project = await store.createProject(name || "New Project");
         return json({ project }, 201);
+      }
+
+      const appMatch = url.pathname.match(/^\/apps\/([^/]+)(?:\/(.*))?$/);
+      if (appMatch) {
+        const [, appId, remainder = ""] = appMatch;
+        const scopedRequest = new Request(new URL(`/apps/${appId}/${remainder}`, request.url), request);
+        return handleAppPreview(scopedRequest, appId, store);
       }
 
       const projectMatch = url.pathname.match(/^\/projects\/([^/]+)(?:\/(.*))?$/);
