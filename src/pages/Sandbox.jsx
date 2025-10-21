@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { io } from "socket.io-client";
-import { useUser } from "@clerk/clerk-react";
+import { useOptionalUser } from "@/lib/clerk";
 import { createClient, LiveObject } from "@liveblocks/client";
 import {
   LiveblocksProvider,
@@ -147,7 +147,7 @@ export default function Sandbox() {
   const socketRef = useRef(null);
   const terminalRef = useRef(null);
 
-  const { isLoaded: isUserLoaded, user } = useUser();
+  const { isLoaded: isUserLoaded, user } = useOptionalUser();
   const liveblocksClient = useMemo(
     () => createClient({ authEndpoint: "/api/liveblocks/auth" }),
     []
