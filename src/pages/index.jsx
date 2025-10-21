@@ -6,7 +6,7 @@ import Sandbox from "./Sandbox";
 import NotFound from "./NotFound.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
-import { ClerkLoading, RedirectToSignIn, SignedIn, SignedOut } from '@/lib/clerk';
+import { ClerkLoaded, ClerkLoading, RedirectToSignIn, SignedIn, SignedOut, isClerkConfigured } from '@/lib/clerk';
 import { createPageUrl } from "@/utils";
 
 const PAGES = {
@@ -22,15 +22,21 @@ const DEFAULT_PAGE_COMPONENT = DEFAULT_PAGE_NAME ? PAGES[DEFAULT_PAGE_NAME] : nu
 const PROTECTED_PAGES = new Set(["Dashboard", "Builder", "Sandbox"]);
 
 function ProtectedRoute({ children }) {
+    if (!isClerkConfigured) {
+        return children;
+    }
+
     return (
         <>
-            <SignedIn>{children}</SignedIn>
             <ClerkLoading>
                 <div className="p-8 text-sm text-slate-500">Checking your session…</div>
             </ClerkLoading>
-            <SignedOut>
-                <RedirectToSignIn />
-            </SignedOut>
+            <ClerkLoaded>
+                <SignedIn>{children}</SignedIn>
+                <SignedOut>
+                    <RedirectToSignIn />
+                </SignedOut>
+            </ClerkLoaded>
         </>
     );
 }

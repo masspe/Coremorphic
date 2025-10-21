@@ -4,11 +4,12 @@ import {
   SignedIn as SignedInInternal,
   SignedOut as SignedOutInternal,
   ClerkLoading as ClerkLoadingInternal,
+  ClerkLoaded as ClerkLoadedInternal,
   RedirectToSignIn as RedirectToSignInInternal,
 } from "@clerk/clerk-react"
 
 export const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
-const isClerkConfigured = Boolean(clerkPublishableKey)
+export const isClerkConfigured = Boolean(clerkPublishableKey)
 
 const MissingClerkMessage = () => (
   <div className="mx-auto max-w-md rounded-3xl border border-amber-200 bg-amber-50/80 p-6 text-sm text-amber-900 shadow-lg">
@@ -51,6 +52,10 @@ export const SignedOut = isClerkConfigured
 export const ClerkLoading = isClerkConfigured
   ? ClerkLoadingInternal
   : ({ children }) => null
+
+export const ClerkLoaded = isClerkConfigured
+  ? ClerkLoadedInternal
+  : ({ children }) => <>{children}</>
 
 export const RedirectToSignIn = isClerkConfigured
   ? RedirectToSignInInternal
