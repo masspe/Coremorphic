@@ -12,6 +12,7 @@ import { Liveblocks } from "@liveblocks/node";
 import { MetadataServiceClient } from "./lib/db.js";
 import { LocalProjectStorage, StorageServiceClient } from "./lib/storage.js";
 import { WorkersAIClient } from "./lib/workersAi.js";
+import { OpenAIClient } from "./lib/openai.js";
 import { SandboxManager } from "./sandbox/orchestrator.js";
 
 const app = express();
@@ -116,8 +117,31 @@ if (shouldUseLocalStorage) {
 const aiBinding =
   typeof WORKERS_AI !== "undefined" ? WORKERS_AI : typeof AI !== "undefined" ? AI : undefined;
 const workersAi = new WorkersAIClient({ binding: aiBinding });
+const openai = new OpenAIClient();
 const defaultWorkersModel =
   process.env.WORKERS_AI_MODEL || process.env.CF_AI_MODEL || "@cf/meta/llama-3-8b-instruct";
+const defaultOpenAIModel =
+  process.env.OPENAI_MODEL || process.env.OPENAI_DEFAULT_MODEL || "gpt-4o-mini";
+
+const resolveAiClient = (requestedModel) => {
+  const model = typeof requestedModel === "string" ? requestedModel.trim() : "";
+  const looksLikeOpenAiModel = model && !model.includes("/");
+
+  if (looksLikeOpenAiModel) {
+    if (!openai.isConfigured()) {
+      const error = new Error("OpenAI API key is not configured");
+      error.statusCode = 400;
+      throw error;
+    }
+    return { client: openai, model };
+  }
+
+  if (openai.isConfigured() && !model) {
+    return { client: openai, model: defaultOpenAIModel };
+  }
+
+  return { client: workersAi, model: model || defaultWorkersModel };
+};
 
 const parseNumberEnv = (value) => {
   const parsed = Number(value);
@@ -840,12 +864,8 @@ Rules:
   const userMessage = `Compilation errors to fix:\n${errorSummary}\n\nRelevant file contents:\n${relevantSection}\n\nReturn the updated files as JSON following the specified shape.`;
 
   try {
-    const json = await workersAi.generateJson(
-      model || defaultWorkersModel,
-      systemMessage,
-      developerMessage,
-      userMessage
-    );
+    const { client, model: resolvedModel } = resolveAiClient(model);
+    const json = await client.generateJson(resolvedModel, systemMessage, developerMessage, userMessage);
 
     if (!json || !json.files || typeof json.files !== "object") {
       throw new Error("Model returned invalid JSON shape.");
@@ -863,8 +883,9 @@ Rules:
     res.json({ ok: true, result: json });
   } catch (error) {
     console.error("Automatic fix failed", error);
-    res.status(500).json({
-      error: error?.message || "Workers AI request failed",
+    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    res.status(status).json({
+      error: error?.message || "AI request failed",
       details: error?.details
     });
   }
@@ -914,12 +935,8 @@ Output only valid JSON. No markdown fences.`;
   const userMessage = `Prompt:\n${prompt}\n\nAdditional instructions (optional):\n${instructions ?? ""}`;
 
   try {
-    const json = await workersAi.generateJson(
-      model || defaultWorkersModel,
-      systemMessage,
-      developerMessage,
-      userMessage
-    );
+    const { client, model: resolvedModel } = resolveAiClient(model);
+    const json = await client.generateJson(resolvedModel, systemMessage, developerMessage, userMessage);
 
     if (!json || !json.files || typeof json.files !== "object") {
       throw new Error("Model returned invalid JSON shape.");
@@ -939,8 +956,9 @@ Output only valid JSON. No markdown fences.`;
     res.json({ ok: true, result: json });
   } catch (error) {
     console.error("Generate request failed", error);
-    res.status(500).json({
-      error: error?.message || "Workers AI request failed",
+    const status = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    res.status(status).json({
+      error: error?.message || "AI request failed",
       details: error?.details
     });
   }

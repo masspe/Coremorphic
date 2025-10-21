@@ -6,19 +6,25 @@ export class OpenAIClient {
     this.baseUrl = baseUrl || process.env.OPENAI_API_URL || DEFAULT_OPENAI_URL;
   }
 
+  isConfigured() {
+    return Boolean(this.apiKey);
+  }
+
   async generateJson(model, system, developer, user) {
     if (!this.apiKey) {
       throw new Error("OpenAI API key is not configured");
     }
 
+    const messages = [
+      { role: "system", content: system },
+      ...(developer ? [{ role: "developer", content: developer }] : []),
+      { role: "user", content: user }
+    ];
+
     const body = {
       model,
       response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: system },
-        { role: "developer", content: developer },
-        { role: "user", content: user }
-      ]
+      messages
     };
 
     const response = await fetch(this.baseUrl, {
@@ -30,13 +36,24 @@ export class OpenAIClient {
       body: JSON.stringify(body)
     });
 
+    let responseJson;
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(errorText || response.statusText);
+      let errorMessage;
+      try {
+        responseJson = await response.json();
+        errorMessage = responseJson?.error?.message || JSON.stringify(responseJson);
+      } catch (_error) {
+        errorMessage = await response.text();
+      }
+      const error = new Error(errorMessage || response.statusText || "OpenAI request failed");
+      error.statusCode = response.status;
+      throw error;
     }
 
-    const json = await response.json();
-    const content = json?.choices?.[0]?.message?.content;
+    responseJson = responseJson ?? (await response.json());
+
+    const content = responseJson?.choices?.[0]?.message?.content;
     if (!content) {
       throw new Error("OpenAI returned an empty response");
     }
@@ -44,7 +61,9 @@ export class OpenAIClient {
     try {
       return JSON.parse(content);
     } catch (error) {
-      throw new Error("Failed to parse JSON response from OpenAI");
+      const parsingError = new Error("Failed to parse JSON response from OpenAI");
+      parsingError.cause = error;
+      throw parsingError;
     }
   }
 }
