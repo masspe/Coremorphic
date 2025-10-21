@@ -714,6 +714,27 @@ app.post("/api/memory/:projectId", async (req, res) => {
   }
 });
 
+app.post("/api/apps/:appId/save", async (req, res) => {
+  const appId = req.params.appId;
+  const code = typeof req.body?.code === "string" ? req.body.code : null;
+
+  if (!appId) {
+    return res.status(400).json({ error: "appId required" });
+  }
+
+  if (code === null) {
+    return res.status(400).json({ error: "code must be a string" });
+  }
+
+  try {
+    const preview = await metadata.setAppPreview(appId, code);
+    res.json({ ok: true, preview });
+  } catch (error) {
+    console.error("Failed to persist app preview", error);
+    res.status(500).json({ error: "Failed to save app preview" });
+  }
+});
+
 app.get("/api/projects/:projectId/files", async (req, res) => {
   try {
     const files = await storage.listProjectFiles(req.params.projectId);
