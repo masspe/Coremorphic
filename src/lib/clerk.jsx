@@ -6,6 +6,7 @@ import {
   ClerkLoading as ClerkLoadingInternal,
   ClerkLoaded as ClerkLoadedInternal,
   RedirectToSignIn as RedirectToSignInInternal,
+  useUser as useUserInternal,
 } from "@clerk/clerk-react"
 
 export const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -60,3 +61,7 @@ export const ClerkLoaded = isClerkConfigured
 export const RedirectToSignIn = isClerkConfigured
   ? RedirectToSignInInternal
   : () => <MissingClerkMessage />
+
+export const useOptionalUser = isClerkConfigured
+  ? useUserInternal
+  : () => ({ isLoaded: true, isSignedIn: false, user: null })
