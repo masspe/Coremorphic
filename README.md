@@ -67,6 +67,24 @@ Coremorphic combines a Vite + React front-end with a Node.js backend that orches
    ```
    The script invokes `/internal/bootstrap` on both services so the tables/buckets exist before the backend starts. 【F:scripts/bootstrap-cloudflare.js†L1-L33】
 
+### Local SQLite development mode
+
+When you omit `METADATA_SERVICE_URL` and `STORAGE_SERVICE_URL`, the backend falls back to the bundled SQLite + filesystem stores:
+
+- Metadata is written to `data/metadata.sqlite` (override with `METADATA_SQLITE_PATH`).
+- Project files are persisted under `local-storage/<projectId>/`.
+
+Starting the server once (`npm run server`) provisions the SQLite schema automatically through the `MetadataServiceClient`. 【F:server/lib/db.js†L285-L319】
+
+Inspect or explore the SQLite database with any SQLite browser. The repository ships with `better-sqlite3`, so you can use its CLI without installing extra tooling:
+
+```bash
+npx better-sqlite3@latest data/metadata.sqlite ".tables"
+npx better-sqlite3@latest data/metadata.sqlite "SELECT id, name, created_at FROM projects ORDER BY created_at DESC;"
+```
+
+The first command lists the provisioned tables, while the second one prints the stored projects so you can verify the contents.
+
 5. **Start the backend**
    ```bash
    npm run server
@@ -85,6 +103,7 @@ Coremorphic combines a Vite + React front-end with a Node.js backend that orches
 | ---- | -------- | ----------- |
 | `PORT` | No | Port for the Node backend. Defaults to `8787`. 【F:server/index.js†L46-L47】 |
 | `METADATA_SERVICE_URL` | Yes (unless using a Cloudflare service binding) | Base URL of the metadata worker that implements the project, memory, and message APIs. 【F:server/lib/db.js†L177-L214】 |
+| `METADATA_SQLITE_PATH` | No | Filesystem location of the local SQLite database used when no metadata service URL is configured. Defaults to `data/metadata.sqlite`. 【F:server/lib/db.js†L285-L319】 |
 | `STORAGE_SERVICE_URL` | Yes (unless using a Cloudflare service binding) | Base URL of the storage worker that persists project files. 【F:server/lib/storage.js†L117-L170】 |
 | `SERVICE_AUTH_TOKEN` / `CLOUDFLARE_SERVICE_TOKEN` | No | Optional bearer token forwarded to the metadata and storage workers. 【F:server/index.js†L48-L69】 |
 | `CF_ACCOUNT_ID` / `WORKERS_ACCOUNT_ID` | Yes for Workers AI over HTTPS | Cloudflare account that hosts Workers AI. Required when no `WORKERS_AI` binding is injected. 【F:server/lib/workersAi.js†L13-L55】 |

@@ -964,9 +964,46 @@ const startServer = async () => {
   });
 };
 
-const handleShutdownSignal = () => {
-  void sandboxManager.shutdown().catch((error) => {
-    console.error("Failed to shut down sandboxes", error);
+const waitForServerClose = () =>
+  new Promise((resolve) => {
+    if (!appServer.listening) {
+      resolve();
+      return;
+    }
+
+    appServer.close((error) => {
+      if (error) {
+        console.error("Error while closing HTTP server", error);
+      }
+      resolve();
+    });
+  });
+
+const closeSocketServer = () =>
+  new Promise((resolve) => {
+    io.close(() => {
+      resolve();
+    });
+  });
+
+let shuttingDown = false;
+
+const handleShutdownSignal = (signal) => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+
+  console.log(`Received ${signal}. Shutting down gracefully...`);
+
+  const tasks = [
+    closeSocketServer(),
+    waitForServerClose(),
+    sandboxManager.shutdown().catch((error) => {
+      console.error("Failed to shut down sandboxes", error);
+    })
+  ];
+
+  Promise.allSettled(tasks).finally(() => {
+    process.exit(0);
   });
 };
 
