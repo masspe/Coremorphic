@@ -1,9 +1,7 @@
 import React from "react";
-import { LayoutDashboard, Code, Eye } from "lucide-react";
+import { LayoutDashboard, Code, Eye, Settings } from "lucide-react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { createPageUrl } from "@/utils";
-import { Link } from "react-router-dom";
 
 const navigationSections = [
   {
@@ -11,6 +9,7 @@ const navigationSections = [
     items: [
       { id: "overview", label: "Overview", icon: LayoutDashboard },
       { id: "code", label: "Code", icon: Code },
+      { id: "settings", label: "Settings", icon: Settings },
     ]
   }
 ];
@@ -23,12 +22,6 @@ export default function BuilderSidebar({ activeSection, setActiveSection }) {
   return (
     <div className="w-56 backdrop-blur-xl bg-white/20 border-r border-white/30 overflow-y-auto flex flex-col">
       <div className="p-4 space-y-2 border-b border-white/30">
-        <Link to={createPageUrl("Dashboard")}>
-          <Button className="w-full backdrop-blur-sm bg-white/90 hover:bg-white text-purple-600 border border-white/50 shadow-xl justify-start">
-            <LayoutDashboard className="w-4 h-4 mr-2" />
-            Dashboard
-          </Button>
-        </Link>
         <Button
           onClick={handleTogglePreview}
           className="w-full backdrop-blur-sm bg-gradient-to-r from-purple-500/20 to-pink-500/20 hover:from-purple-500/30 hover:to-pink-500/30 text-purple-900 border border-purple-500/40 shadow-xl justify-start"
