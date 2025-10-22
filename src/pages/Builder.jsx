@@ -5,6 +5,7 @@ import AIAssistant from "../components/builder/AIAssistant";
 import PreviewPanel from "../components/builder/PreviewPanel";
 import OverviewSection from "../components/builder/sections/OverviewSection";
 import CodeSection from "../components/builder/sections/CodeSection";
+import AppSettingsSection from "../components/builder/sections/AppSettingsSection";
 
 export default function Builder() {
   const [searchParams] = useSearchParams();
@@ -36,6 +37,8 @@ export default function Builder() {
     switch (activeSection) {
       case "code":
         return <CodeSection projectId={projectId} />;
+      case "settings":
+        return <AppSettingsSection projectId={projectId} />;
       case "overview":
       default:
         return <OverviewSection projectId={projectId} />;
