@@ -2,7 +2,7 @@ import React from "react"
 import clsx from "clsx"
 import { Link } from "react-router-dom"
 import { createPageUrl } from "@/utils"
-import { Home, LayoutDashboard, Code, Play } from "lucide-react"
+import { Home, LayoutDashboard, Code } from "lucide-react"
 import { backend } from "@/api/backendClient"
 import CoremorphicLogo from "@/components/CoremorphicLogo"
 
@@ -10,7 +10,6 @@ const navigationItems = [
   { title: "Home", url: createPageUrl("Home"), icon: Home },
   { title: "Dashboard", url: createPageUrl("Dashboard"), icon: LayoutDashboard },
   { title: "Builder", url: createPageUrl("Builder"), icon: Code },
-  { title: "Sandbox", url: createPageUrl("Sandbox"), icon: Play },
 ]
 
 export default function Layout({ children, currentPageName, pageNames = [] }) {

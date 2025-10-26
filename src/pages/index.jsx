@@ -2,7 +2,6 @@ import Layout from "./Layout.jsx";
 import Home from "./Home";
 import Dashboard from "./Dashboard";
 import Builder from "./Builder";
-import Sandbox from "./Sandbox";
 import NotFound from "./NotFound.jsx";
 
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
@@ -13,13 +12,12 @@ const PAGES = {
     Home: Home,
     Dashboard: Dashboard,
     Builder: Builder,
-    Sandbox: Sandbox,
 };
 
 const PAGE_NAMES = Object.keys(PAGES);
 const DEFAULT_PAGE_NAME = PAGE_NAMES[0];
 const DEFAULT_PAGE_COMPONENT = DEFAULT_PAGE_NAME ? PAGES[DEFAULT_PAGE_NAME] : null;
-const PROTECTED_PAGES = new Set(["Dashboard", "Builder", "Sandbox"]);
+const PROTECTED_PAGES = new Set(["Dashboard", "Builder"]);
 
 function ProtectedRoute({ children }) {
     if (!isClerkConfigured) {
