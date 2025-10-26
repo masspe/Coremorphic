@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
-  SandpackProvider,
+  Sandpack,
   SandpackPreview,
   useErrorMessage
 } from "@codesandbox/sandpack-react";
@@ -244,7 +244,7 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
             </div>
           ) : (
             <div className="relative h-full">
-              <SandpackProvider
+              <Sandpack
                 key={refreshKey}
                 template={normalizedSandpackConfig.template}
                 files={sandpackFiles}
@@ -252,6 +252,8 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
                   autorun: true,
                   recompileMode: "delayed",
                   recompileDelay: 300,
+                  editorHeight: 0,
+                  showTabs: false,
                   externalResources: []
                 }}
                 customSetup={{
@@ -270,7 +272,7 @@ export default function PreviewPanel({ projectId, selectedFile, onClose }) {
                   />
                 </div>
                 <SandpackErrorBridge onErrorChange={handleRuntimeErrorChange} />
-              </SandpackProvider>
+              </Sandpack>
 
               {runtimeError && (
                 <div className="absolute inset-0 flex items-center justify-center">
