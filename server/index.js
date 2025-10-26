@@ -6,14 +6,10 @@ import { z } from "zod";
 import path from "path";
 import esbuild from "esbuild";
 import crypto from "crypto";
-import { createServer } from "http";
-import { Server as SocketIOServer } from "socket.io";
-import { Liveblocks } from "@liveblocks/node";
 import { MetadataServiceClient } from "./lib/db.js";
 import { LocalProjectStorage, StorageServiceClient } from "./lib/storage.js";
 import { WorkersAIClient } from "./lib/workersAi.js";
 import { OpenAIClient } from "./lib/openai.js";
-import { SandboxManager } from "./sandbox/orchestrator.js";
 
 const app = express();
 
@@ -35,24 +31,6 @@ const createWithAuthMiddleware =
       ? () => ClerkExpress.clerkMiddleware()
       : undefined;
 
-const createRequireSession =
-  typeof ClerkExpress.requireSession === "function"
-    ? ClerkExpress.requireSession
-    : typeof ClerkExpress.requireAuth === "function"
-      ? ClerkExpress.requireAuth
-      : typeof ClerkExpress.ClerkExpressRequireAuth === "function"
-        ? ClerkExpress.ClerkExpressRequireAuth
-        : undefined;
-
-const clerkClient =
-  ClerkExpress.clerkClient ??
-  (typeof ClerkExpress.createClerkClient === "function" && isClerkConfigured
-    ? ClerkExpress.createClerkClient({
-        secretKey: clerkSecretKey,
-        publishableKey: clerkPublishableKey
-      })
-    : undefined);
-
 if (isClerkConfigured) {
   if (createWithAuthMiddleware) {
     app.use(
@@ -68,16 +46,6 @@ if (isClerkConfigured) {
   }
 } else {
   console.warn("Clerk keys are not configured. Authentication-sensitive endpoints will be disabled.");
-}
-
-let ensureClerkSession = (_req, res, next) => {
-  res.status(500).json({ error: "Clerk is not configured" });
-};
-
-if (isClerkConfigured && createRequireSession) {
-  ensureClerkSession = createRequireSession();
-} else if (isClerkConfigured) {
-  console.warn("Clerk session middleware is unavailable. Authentication-sensitive endpoints will be disabled.");
 }
 
 app.use(cors());
@@ -143,163 +111,7 @@ const resolveAiClient = (requestedModel) => {
   return { client: workersAi, model: model || defaultWorkersModel };
 };
 
-const parseNumberEnv = (value) => {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
-};
-
-const sandboxManager = new SandboxManager({
-  idleTimeoutMs: parseNumberEnv(process.env.SANDBOX_IDLE_TIMEOUT_MS),
-  defaultPreviewPort: parseNumberEnv(process.env.SANDBOX_PREVIEW_PORT)
-});
-
-const liveblocksSecretKey = process.env.LIVEBLOCKS_SECRET_KEY;
-const liveblocksClient = liveblocksSecretKey ? new Liveblocks({ secret: liveblocksSecretKey }) : null;
-
-if (!liveblocksSecretKey) {
-  console.warn("Liveblocks secret key is not set. Collaborative rooms will not be available.");
-}
-
-const appServer = createServer(app);
-const io = new SocketIOServer(appServer, {
-  cors: {
-    origin: process.env.SANDBOX_SOCKET_ORIGIN || "*",
-    methods: ["GET", "POST"]
-  }
-});
-
-io.on("connection", (socket) => {
-  const handshake = socket.handshake ?? {};
-  const query = handshake.query ?? {};
-  const projectIdRaw = Array.isArray(query.projectId) ? query.projectId[0] : query.projectId;
-  const projectId = typeof projectIdRaw === "string" ? projectIdRaw : "";
-
-  if (!projectId) {
-    socket.emit("sandbox:error", { message: "projectId query parameter is required" });
-    socket.disconnect(true);
-    return;
-  }
-
-  let session;
-  let terminal;
-  let releaseConnection;
-  const acquiredPorts = new Map();
-
-  const releaseAllPorts = async () => {
-    await Promise.all(
-      Array.from(acquiredPorts.values()).map(async (handle) => {
-        try {
-          await handle.release?.();
-        } catch (error) {
-          console.warn("Failed to release port forward", error);
-        }
-      })
-    );
-    acquiredPorts.clear();
-  };
-
-  (async () => {
-    try {
-      session = await sandboxManager.ensureSession(projectId);
-      releaseConnection = session.acquireConnection();
-
-      const storedFiles = await storage.listProjectFiles(projectId);
-      await session.syncProject(
-        storedFiles.map((file) => ({
-          path: file.path,
-          content: file.content ?? ""
-        }))
-      );
-
-      terminal = await session.createTerminal();
-      terminal.on("data", (data) => {
-        socket.emit("terminal:data", data);
-      });
-      terminal.on("exit", (payload) => {
-        socket.emit("terminal:exit", payload);
-      });
-      terminal.on("error", (error) => {
-        socket.emit("terminal:error", { message: error?.message || String(error) });
-      });
-
-      socket.emit("terminal:ready");
-    } catch (error) {
-      console.error("Failed to initialize sandbox session", error);
-      socket.emit("sandbox:error", { message: error?.message || String(error) });
-    }
-  })();
-
-  socket.on("terminal:input", (chunk) => {
-    try {
-      terminal?.write(chunk);
-      session?.touch();
-    } catch (error) {
-      console.error("Failed to write to sandbox terminal", error);
-      socket.emit("terminal:error", { message: error?.message || String(error) });
-    }
-  });
-
-  socket.on("terminal:resize", (size) => {
-    try {
-      terminal?.resize(size);
-    } catch (error) {
-      console.error("Failed to resize sandbox terminal", error);
-    }
-  });
-
-  socket.on("preview:open", async (payload) => {
-    if (!session) {
-      socket.emit("preview:error", { message: "Sandbox session is not ready" });
-      return;
-    }
-
-    try {
-      const portValue = payload?.port ?? payload?.remotePort;
-      const portNumber = Number(portValue);
-      if (!Number.isInteger(portNumber)) {
-        throw new Error("preview:open requires a valid numeric port");
-      }
-
-      const handle = await session.acquirePort(portNumber);
-      acquiredPorts.set(portNumber, handle);
-      socket.emit("preview:ready", {
-        remotePort: handle.remotePort,
-        localPort: handle.localPort,
-        url: handle.url
-      });
-    } catch (error) {
-      console.error("Failed to open preview port", error);
-      socket.emit("preview:error", { message: error?.message || String(error) });
-    }
-  });
-
-  socket.on("preview:close", async (payload) => {
-    const portValue = payload?.port ?? payload?.remotePort;
-    const portNumber = Number(portValue);
-    const handle = acquiredPorts.get(portNumber);
-    if (!handle) return;
-    acquiredPorts.delete(portNumber);
-    try {
-      await handle.release?.();
-      socket.emit("preview:closed", { remotePort: portNumber });
-    } catch (error) {
-      console.warn("Failed to close preview port", error);
-    }
-  });
-
-  socket.on("disconnect", async () => {
-    try {
-      await releaseAllPorts();
-    } finally {
-      terminal?.dispose();
-      terminal = null;
-      if (typeof releaseConnection === "function") {
-        releaseConnection();
-        releaseConnection = undefined;
-      }
-    }
-  });
-});
+let httpServer = null;
 
 const PREVIEW_ENTRY_CANDIDATES = [
   "src/main.tsx",
@@ -619,80 +431,6 @@ app.post("/api/projects", async (req, res) => {
   }
 });
 
-app.post("/api/liveblocks/auth", ensureClerkSession, async (req, res) => {
-  if (!liveblocksClient) {
-    res.status(500).json({ error: "Liveblocks is not configured" });
-    return;
-  }
-
-  const { room } = req.body ?? {};
-  const roomId = typeof room === "string" ? room.trim() : "";
-  if (!roomId) {
-    res.status(400).json({ error: "room is required" });
-    return;
-  }
-
-  if (!roomId.startsWith("project-")) {
-    res.status(400).json({ error: "Invalid room identifier" });
-    return;
-  }
-
-  const projectId = roomId.replace(/^project-/, "");
-  if (!projectId) {
-    res.status(400).json({ error: "Invalid room identifier" });
-    return;
-  }
-
-  const project = await metadata.getProject(projectId);
-  if (!project) {
-    res.status(404).json({ error: "Project not found" });
-    return;
-  }
-
-  const { userId } = req.auth;
-  if (!userId) {
-    res.status(401).json({ error: "Unauthorized" });
-    return;
-  }
-
-  let displayName = "Collaborator";
-  let avatarUrl = null;
-
-  if (clerkClient?.users?.getUser) {
-    try {
-      const clerkUser = await clerkClient.users.getUser(userId);
-      if (clerkUser) {
-        displayName =
-          clerkUser.fullName ||
-          clerkUser.username ||
-          clerkUser.primaryEmailAddress?.emailAddress ||
-          clerkUser.id ||
-          displayName;
-        avatarUrl = clerkUser.imageUrl || null;
-      }
-    } catch (error) {
-      console.warn("Failed to fetch Clerk user profile", error);
-    }
-  }
-
-  try {
-    const session = liveblocksClient.prepareSession(userId, {
-      userInfo: {
-        name: displayName,
-        image: avatarUrl || undefined
-      }
-    });
-
-    session.allow(roomId, session.FULL_ACCESS);
-
-    const { body, status } = await session.authorize();
-    res.status(status).json(body);
-  } catch (error) {
-    console.error("Failed to authorize Liveblocks session", error);
-    res.status(500).json({ error: "Failed to authorize Liveblocks session" });
-  }
-});
-
 app.get("/api/memory/:projectId", async (req, res) => {
   try {
     const memory = await metadata.getMemory(req.params.projectId);
@@ -998,29 +736,22 @@ const startServer = async () => {
     console.warn("Failed to bootstrap storage service", error);
   }
 
-  appServer.listen(port, () => {
+  httpServer = app.listen(port, () => {
     console.log(`AI generator server listening on http://localhost:${port}`);
   });
 };
 
 const waitForServerClose = () =>
   new Promise((resolve) => {
-    if (!appServer.listening) {
+    if (!httpServer || !httpServer.listening) {
       resolve();
       return;
     }
 
-    appServer.close((error) => {
+    httpServer.close((error) => {
       if (error) {
         console.error("Error while closing HTTP server", error);
       }
-      resolve();
-    });
-  });
-
-const closeSocketServer = () =>
-  new Promise((resolve) => {
-    io.close(() => {
       resolve();
     });
   });
@@ -1033,13 +764,7 @@ const handleShutdownSignal = (signal) => {
 
   console.log(`Received ${signal}. Shutting down gracefully...`);
 
-  const tasks = [
-    closeSocketServer(),
-    waitForServerClose(),
-    sandboxManager.shutdown().catch((error) => {
-      console.error("Failed to shut down sandboxes", error);
-    })
-  ];
+  const tasks = [waitForServerClose()];
 
   Promise.allSettled(tasks).finally(() => {
     process.exit(0);
